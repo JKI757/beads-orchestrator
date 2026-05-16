@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "Beads_Orchestrator",
+  "project_id": "48f742e8-a41d-4e7d-ade1-76f062b6904b"
+}
