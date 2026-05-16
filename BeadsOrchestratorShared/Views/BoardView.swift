@@ -192,7 +192,7 @@ private struct ColumnView: View {
 
     private var cardGutter: CGFloat {
         #if os(macOS)
-        6
+        10
         #else
         density == .dense ? 8 : 10
         #endif
@@ -208,7 +208,7 @@ private struct ColumnView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
                 if isRenaming {
                     TextField("Column", text: $columnName)
                         .textFieldStyle(.roundedBorder)
@@ -231,6 +231,7 @@ private struct ColumnView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(.quaternary, in: Capsule())
+                    .fixedSize()
                 Menu {
                     Button("Rename") {
                         columnName = column.name
@@ -243,15 +244,16 @@ private struct ColumnView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .frame(width: 22, height: 22)
                 .buttonStyle(.plain)
             }
-            .frame(width: contentWidth)
+            .frame(width: contentWidth, alignment: .leading)
 
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(beads) { bead in
                         BeadCardView(bead: bead, density: density)
-                            .frame(width: contentWidth)
+                            .frame(width: contentWidth, alignment: .leading)
                     }
                 }
                 .frame(width: contentWidth, alignment: .leading)
@@ -262,6 +264,7 @@ private struct ColumnView: View {
         .padding(.vertical, columnPadding)
         .padding(.horizontal, contentInset)
         .frame(width: width)
+        .clipped()
         #if os(macOS)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay {
