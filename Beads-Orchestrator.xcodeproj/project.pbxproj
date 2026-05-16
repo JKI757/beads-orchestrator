@@ -1,0 +1,484 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* BeadsOrchestratorIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* BeadsOrchestratorIOSApp.swift */; };
+		A10000000000000000000002 /* Board.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* Board.swift */; };
+		A10000000000000000000003 /* Bead.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* Bead.swift */; };
+		A10000000000000000000004 /* BoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* BoardStore.swift */; };
+		A10000000000000000000005 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* RootView.swift */; };
+		A10000000000000000000006 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* SidebarView.swift */; };
+		A10000000000000000000007 /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* BoardView.swift */; };
+		A10000000000000000000008 /* BeadCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* BeadCardView.swift */; };
+		A10000000000000000000009 /* BeadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* BeadDetailView.swift */; };
+		A10000000000000000000010 /* BeadsOrchestratorMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* BeadsOrchestratorMacApp.swift */; };
+		A10000000000000000000011 /* Board.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* Board.swift */; };
+		A10000000000000000000012 /* Bead.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* Bead.swift */; };
+		A10000000000000000000013 /* BoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* BoardStore.swift */; };
+		A10000000000000000000014 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* RootView.swift */; };
+		A10000000000000000000015 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* SidebarView.swift */; };
+		A10000000000000000000016 /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* BoardView.swift */; };
+		A10000000000000000000017 /* BeadCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* BeadCardView.swift */; };
+		A10000000000000000000018 /* BeadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* BeadDetailView.swift */; };
+		A10000000000000000000019 /* RepositorySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* RepositorySource.swift */; };
+		A10000000000000000000020 /* RepositorySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* RepositorySource.swift */; };
+		A10000000000000000000021 /* BeadsNetworkModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* BeadsNetworkModels.swift */; };
+		A10000000000000000000022 /* BeadsServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* BeadsServerClient.swift */; };
+		A10000000000000000000023 /* BeadsHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* BeadsHTTPServer.swift */; };
+		A10000000000000000000024 /* BeadsNetworkModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* BeadsNetworkModels.swift */; };
+		A10000000000000000000025 /* BeadsServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* BeadsServerClient.swift */; };
+		A10000000000000000000026 /* BeadsHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* BeadsHTTPServer.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* BeadsOrchestratorIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsOrchestratorIOSApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* Board.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Board.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* Bead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bead.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* BoardStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardStore.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* BeadCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadCardView.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* BeadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadDetailView.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* BeadsOrchestratorMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsOrchestratorMacApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* RepositorySource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositorySource.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 /* BeadsNetworkModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsNetworkModels.swift; sourceTree = "<group>"; };
+		A20000000000000000000013 /* BeadsServerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsServerClient.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* BeadsHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsHTTPServer.swift; sourceTree = "<group>"; };
+		A20000000000000000000020 /* Beads-Orchestrator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Beads-Orchestrator.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000021 /* Beads-Orchestrator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Beads-Orchestrator.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000002 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* Apps */,
+				A40000000000000000000005 /* BeadsOrchestratorShared */,
+				A40000000000000000000020 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* Apps */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000003 /* iOS */,
+				A40000000000000000000004 /* macOS */,
+			);
+			path = Apps;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* iOS */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000001 /* BeadsOrchestratorIOSApp.swift */);
+			path = iOS;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* macOS */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000010 /* BeadsOrchestratorMacApp.swift */);
+			path = macOS;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* BeadsOrchestratorShared */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000006 /* Models */,
+				A40000000000000000000007 /* ViewModels */,
+				A40000000000000000000008 /* Views */,
+				A40000000000000000000009 /* Services */,
+			);
+			path = BeadsOrchestratorShared;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000006 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000003 /* Bead.swift */,
+				A20000000000000000000002 /* Board.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000007 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (A20000000000000000000004 /* BoardStore.swift */);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000008 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000005 /* RootView.swift */,
+				A20000000000000000000006 /* SidebarView.swift */,
+				A20000000000000000000007 /* BoardView.swift */,
+				A20000000000000000000008 /* BeadCardView.swift */,
+				A20000000000000000000009 /* BeadDetailView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000009 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000011 /* RepositorySource.swift */,
+				A20000000000000000000012 /* BeadsNetworkModels.swift */,
+				A20000000000000000000013 /* BeadsServerClient.swift */,
+				A20000000000000000000014 /* BeadsHTTPServer.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000020 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000020 /* Beads-Orchestrator.app */,
+				A20000000000000000000021 /* Beads-Orchestrator.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* Beads-Orchestrator iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000001 /* Build configuration list for PBXNativeTarget "Beads-Orchestrator iOS" */;
+			buildPhases = (
+				A60000000000000000000001 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A70000000000000000000001 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = "Beads-Orchestrator iOS";
+			productName = "Beads-Orchestrator";
+			productReference = A20000000000000000000020 /* Beads-Orchestrator.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A50000000000000000000002 /* Beads-Orchestrator macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000002 /* Build configuration list for PBXNativeTarget "Beads-Orchestrator macOS" */;
+			buildPhases = (
+				A60000000000000000000002 /* Sources */,
+				A30000000000000000000002 /* Frameworks */,
+				A70000000000000000000002 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = "Beads-Orchestrator macOS";
+			productName = "Beads-Orchestrator";
+			productReference = A20000000000000000000021 /* Beads-Orchestrator.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A90000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1530;
+				LastUpgradeCheck = 1530;
+				TargetAttributes = {
+					A50000000000000000000001 = {CreatedOnToolsVersion = 15.3;};
+					A50000000000000000000002 = {CreatedOnToolsVersion = 15.3;};
+				};
+			};
+			buildConfigurationList = A80000000000000000000003 /* Build configuration list for PBXProject "Beads-Orchestrator" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A40000000000000000000001;
+			productRefGroup = A40000000000000000000020 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* Beads-Orchestrator iOS */,
+				A50000000000000000000002 /* Beads-Orchestrator macOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A70000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A70000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* BeadsOrchestratorIOSApp.swift in Sources */,
+				A10000000000000000000002 /* Board.swift in Sources */,
+				A10000000000000000000003 /* Bead.swift in Sources */,
+				A10000000000000000000004 /* BoardStore.swift in Sources */,
+				A10000000000000000000005 /* RootView.swift in Sources */,
+				A10000000000000000000006 /* SidebarView.swift in Sources */,
+				A10000000000000000000007 /* BoardView.swift in Sources */,
+				A10000000000000000000008 /* BeadCardView.swift in Sources */,
+				A10000000000000000000009 /* BeadDetailView.swift in Sources */,
+				A10000000000000000000019 /* RepositorySource.swift in Sources */,
+				A10000000000000000000021 /* BeadsNetworkModels.swift in Sources */,
+				A10000000000000000000022 /* BeadsServerClient.swift in Sources */,
+				A10000000000000000000023 /* BeadsHTTPServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A60000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000010 /* BeadsOrchestratorMacApp.swift in Sources */,
+				A10000000000000000000011 /* Board.swift in Sources */,
+				A10000000000000000000012 /* Bead.swift in Sources */,
+				A10000000000000000000013 /* BoardStore.swift in Sources */,
+				A10000000000000000000014 /* RootView.swift in Sources */,
+				A10000000000000000000015 /* SidebarView.swift in Sources */,
+				A10000000000000000000016 /* BoardView.swift in Sources */,
+				A10000000000000000000017 /* BeadCardView.swift in Sources */,
+				A10000000000000000000018 /* BeadDetailView.swift in Sources */,
+				A10000000000000000000020 /* RepositorySource.swift in Sources */,
+				A10000000000000000000024 /* BeadsNetworkModels.swift in Sources */,
+				A10000000000000000000025 /* BeadsServerClient.swift in Sources */,
+				A10000000000000000000026 /* BeadsHTTPServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = "DEBUG=1";
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = auto;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = auto;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		AA0000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/iOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.beadsorchestrator.ios;
+				PRODUCT_NAME = "Beads-Orchestrator";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Apps/iOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.beadsorchestrator.ios;
+				PRODUCT_NAME = "Beads-Orchestrator";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AA0000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Beads-Orchestrator";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Host a Beads-Orchestrator server for devices on your local network or Tailscale.";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.beadsorchestrator.macos;
+				PRODUCT_NAME = "Beads-Orchestrator";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Beads-Orchestrator";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Host a Beads-Orchestrator server for devices on your local network or Tailscale.";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.beadsorchestrator.macos;
+				PRODUCT_NAME = "Beads-Orchestrator";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A80000000000000000000001 /* Build configuration list for PBXNativeTarget "Beads-Orchestrator iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000003 /* Debug */,
+				AA0000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000002 /* Build configuration list for PBXNativeTarget "Beads-Orchestrator macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000005 /* Debug */,
+				AA0000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000003 /* Build configuration list for PBXProject "Beads-Orchestrator" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000001 /* Debug */,
+				AA0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A90000000000000000000001 /* Project object */;
+}

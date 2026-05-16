@@ -1,9 +1,44 @@
-DerivedData/
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode user state
 xcuserdata/
 *.xcuserstate
+*.xcscmblueprint
 
-# Beads / Dolt files (added by bd init)
+# Build products
+DerivedData/
+build/
+Build/
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Playgrounds and previews
+timeline.xctimeline
+playground.xcworkspace/
+
+# Local tooling and logs
+*.log
+*.tmp
+*.swp
+*.swo
+.env
+.env.*
+
+# Generated local screenshots from simulator and macOS review passes
+Beads-Orchestrator-*.png
+
+# Beads / Dolt files
 .dolt/
 *.db
 .beads-credential-key
