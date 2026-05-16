@@ -10,6 +10,21 @@ This is an early buildable MVP. It includes the shared SwiftUI board experience,
 
 The macOS app is the canonical source of truth. iPhone and iPad clients are views over that server state with local caching and authenticated mutation requests.
 
+## Screenshots
+
+### macOS
+
+<p>
+  <img src="docs/screenshots/macos-board.png" alt="Beads-Orchestrator macOS board with sidebar, bead list, and detail inspector" width="900">
+</p>
+
+### iPadOS And iOS
+
+<p>
+  <img src="docs/screenshots/ipados-landscape.png" alt="Beads-Orchestrator iPadOS landscape layout with board and detail pane" width="520">
+  <img src="docs/screenshots/ios-board.png" alt="Beads-Orchestrator iOS compact board layout" width="260">
+</p>
+
 ## Features
 
 - SwiftUI kanban board shared across macOS, iPadOS, and iOS.
