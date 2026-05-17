@@ -52,6 +52,13 @@ enum BoardPresentation {
     case tabletLandscape
 }
 
+enum HierarchyPresentation {
+    case mac
+    case tabletPortrait
+    case tabletLandscape
+    case compact
+}
+
 private struct BoardMetrics {
     let containerSize: CGSize
     let presentation: BoardPresentation
@@ -310,5 +317,372 @@ private struct AddColumnView: View {
         #else
         .padding(10)
         #endif
+    }
+}
+
+struct HierarchyView: View {
+    @EnvironmentObject private var store: BoardStore
+    let board: Board
+    var presentation: HierarchyPresentation
+    @State private var expandedIDs: Set<String> = []
+    @State private var initializedBoardID: Board.ID?
+
+    private var isCompact: Bool {
+        presentation == .compact
+    }
+
+    private var rows: [HierarchyRowNode] {
+        HierarchyOutlineBuilder.rows(
+            from: store.visibleBeads(in: board),
+            expandedIDs: expandedIDs
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HierarchyHeader(board: board, isCompact: isCompact)
+
+            if rows.isEmpty {
+                ContentUnavailableView("No Beads", systemImage: "list.bullet.indent", description: Text("No beads match the current filters."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(rows) { node in
+                        HierarchyRowLink(
+                            node: node,
+                            presentation: presentation,
+                            isExpanded: expandedIDs.contains(node.bead.relationshipID),
+                            toggleExpansion: {
+                                toggleExpansion(for: node.bead)
+                            }
+                        )
+                        .listRowInsets(rowInsets(for: node.depth))
+                    }
+                }
+                #if os(macOS)
+                .listStyle(.inset(alternatesRowBackgrounds: true))
+                #else
+                .listStyle(.insetGrouped)
+                .refreshable {
+                    await store.pullFromRemoteServer()
+                }
+                #endif
+            }
+        }
+        .background(.background)
+        #if os(macOS)
+        .background(Color(nsColor: .underPageBackgroundColor))
+        .navigationSubtitle(board.repositoryPath ?? "No local repository connected")
+        #endif
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .navigationTitle(board.name)
+        .onAppear {
+            initializeExpansion()
+        }
+        .onChange(of: board.id) {
+            initializeExpansion(reset: true)
+        }
+        .onChange(of: board.updatedAt) {
+            initializeExpansion()
+        }
+    }
+
+    private func toggleExpansion(for bead: Bead) {
+        let relationshipID = bead.relationshipID
+        if expandedIDs.contains(relationshipID) {
+            expandedIDs.remove(relationshipID)
+        } else {
+            expandedIDs.insert(relationshipID)
+        }
+    }
+
+    private func initializeExpansion(reset: Bool = false) {
+        let parentIDs = Set(
+            store.visibleBeads(in: board)
+                .filter { !$0.childBeadsIDs.isEmpty }
+                .map(\.relationshipID)
+        )
+
+        if reset || initializedBoardID != board.id {
+            expandedIDs = parentIDs
+            initializedBoardID = board.id
+        } else {
+            expandedIDs.formUnion(parentIDs)
+        }
+    }
+
+    private func rowInsets(for depth: Int) -> EdgeInsets {
+        let leading = (isCompact ? 12 : 16) + CGFloat(min(depth, 5)) * (isCompact ? 18 : 22)
+        return EdgeInsets(top: 6, leading: leading, bottom: 6, trailing: isCompact ? 12 : 16)
+    }
+}
+
+private struct HierarchyHeader: View {
+    @EnvironmentObject private var store: BoardStore
+    let board: Board
+    let isCompact: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(board.repositoryName)
+                    .font(isCompact ? .subheadline.weight(.semibold) : .headline.weight(.semibold))
+                Text(board.repositoryPath ?? "No local repository connected")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Text("\(store.visibleBeads(in: board).count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.quaternary, in: Capsule())
+        }
+        .padding(.horizontal, isCompact ? 16 : 18)
+        .padding(.vertical, isCompact ? 10 : 12)
+        #if os(macOS)
+        .background(Color(nsColor: .underPageBackgroundColor))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.16))
+                .frame(height: 1)
+        }
+        #else
+        .background(.bar)
+        #endif
+    }
+}
+
+private struct HierarchyRowLink: View {
+    @EnvironmentObject private var store: BoardStore
+    let node: HierarchyRowNode
+    let presentation: HierarchyPresentation
+    let isExpanded: Bool
+    let toggleExpansion: () -> Void
+
+    var body: some View {
+        #if os(iOS)
+        if presentation == .compact {
+            NavigationLink {
+                BeadDetailView(bead: node.bead)
+            } label: {
+                row
+            }
+            .simultaneousGesture(TapGesture().onEnded {
+                store.select(node.bead)
+            })
+        } else {
+            Button {
+                store.select(node.bead)
+            } label: {
+                row
+            }
+            .buttonStyle(.plain)
+        }
+        #else
+        Button {
+            store.select(node.bead)
+        } label: {
+            row
+        }
+        .buttonStyle(.plain)
+        #endif
+    }
+
+    private var row: some View {
+        HierarchyRow(
+            node: node,
+            isExpanded: isExpanded,
+            statusText: node.bead.status ?? store.columnName(for: node.bead) ?? "No status",
+            isSelected: store.selectedBeadID == node.bead.id,
+            toggleExpansion: toggleExpansion
+        )
+    }
+}
+
+private struct HierarchyRow: View {
+    let node: HierarchyRowNode
+    let isExpanded: Bool
+    let statusText: String
+    let isSelected: Bool
+    let toggleExpansion: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: node.hasChildren ? (isExpanded ? "chevron.down" : "chevron.right") : "circle.fill")
+                .font(node.hasChildren ? .caption.weight(.semibold) : .system(size: 5))
+                .foregroundStyle(node.hasChildren ? Color.accentColor : Color.secondary.opacity(0.55))
+                .frame(width: 18, height: 22)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard node.hasChildren else { return }
+                    toggleExpansion()
+                }
+                .accessibilityLabel(node.hasChildren ? (isExpanded ? "Collapse" : "Expand") : "No children")
+                .accessibilityAddTraits(node.hasChildren ? .isButton : [])
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(node.bead.title)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    if node.hasChildren {
+                        Label("\(node.childCount)", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .labelStyle(.titleAndIcon)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if node.bead.isBlocked {
+                        Text("Blocked")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.red.opacity(0.12), in: Capsule())
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    HierarchyChip(text: node.bead.issueType ?? node.bead.sourceType.displayName, systemImage: "tag")
+                    HierarchyChip(text: statusText, systemImage: "circle.dotted")
+                    HierarchyChip(text: node.bead.priority.rawValue.capitalized, systemImage: "flag")
+
+                    if node.bead.isStale {
+                        HierarchyChip(text: "Stale", systemImage: "clock", color: .orange)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+private struct HierarchyChip: View {
+    let text: String
+    let systemImage: String
+    var color: Color = .secondary
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption2)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.10), in: Capsule())
+    }
+}
+
+private struct HierarchyRowNode: Identifiable {
+    let bead: Bead
+    let depth: Int
+    let hasChildren: Bool
+    let childCount: Int
+
+    var id: String {
+        bead.relationshipID
+    }
+}
+
+private enum HierarchyOutlineBuilder {
+    static func rows(from beads: [Bead], expandedIDs: Set<String>) -> [HierarchyRowNode] {
+        let orderedBeads = beads.filter { !$0.isArchived }
+        let beadsByID = Dictionary(
+            orderedBeads.map { ($0.relationshipID, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+        let visibleIDs = Set(beadsByID.keys)
+        let childIDsByParent = childMap(for: orderedBeads, visibleIDs: visibleIDs)
+        var rootIDs: [String] = []
+        var parentedIDs = Set<String>()
+
+        for bead in orderedBeads {
+            let relationshipID = bead.relationshipID
+            if let parentID = bead.parentBeadsID, visibleIDs.contains(parentID) {
+                parentedIDs.insert(relationshipID)
+            } else {
+                rootIDs.append(relationshipID)
+            }
+        }
+
+        for childIDs in childIDsByParent.values {
+            parentedIDs.formUnion(childIDs)
+        }
+        rootIDs.removeAll { parentedIDs.contains($0) }
+
+        var result: [HierarchyRowNode] = []
+        var visitedIDs = Set<String>()
+
+        func append(_ relationshipID: String, depth: Int) {
+            guard !visitedIDs.contains(relationshipID), let bead = beadsByID[relationshipID] else { return }
+            visitedIDs.insert(relationshipID)
+
+            let childIDs = childIDsByParent[relationshipID] ?? []
+            result.append(
+                HierarchyRowNode(
+                    bead: bead,
+                    depth: depth,
+                    hasChildren: !childIDs.isEmpty,
+                    childCount: childIDs.count
+                )
+            )
+
+            guard expandedIDs.contains(relationshipID) else { return }
+            for childID in childIDs {
+                append(childID, depth: depth + 1)
+            }
+        }
+
+        for rootID in rootIDs {
+            append(rootID, depth: 0)
+        }
+
+        for bead in orderedBeads where !visitedIDs.contains(bead.relationshipID) {
+            append(bead.relationshipID, depth: 0)
+        }
+
+        return result
+    }
+
+    private static func childMap(for beads: [Bead], visibleIDs: Set<String>) -> [String: [String]] {
+        var childIDsByParent: [String: [String]] = [:]
+
+        for bead in beads {
+            guard let parentID = bead.parentBeadsID, visibleIDs.contains(parentID) else { continue }
+            childIDsByParent[parentID, default: []].append(bead.relationshipID)
+        }
+
+        for bead in beads {
+            let visibleChildIDs = bead.childBeadsIDs.filter { visibleIDs.contains($0) }
+            guard !visibleChildIDs.isEmpty else { continue }
+
+            var children = childIDsByParent[bead.relationshipID, default: []]
+            for childID in visibleChildIDs where !children.contains(childID) {
+                children.append(childID)
+            }
+            childIDsByParent[bead.relationshipID] = children
+        }
+
+        return childIDsByParent
     }
 }

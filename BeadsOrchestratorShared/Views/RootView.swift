@@ -20,6 +20,7 @@ struct RootView: View {
     @State private var showingNewBead = false
     @State private var showingRepositoryImporter = false
     @State private var showingConnectionSettings = false
+    @State private var workspaceMode: WorkspaceMode = .board
     #if os(macOS)
     @State private var showingPairingCode = false
     #endif
@@ -41,7 +42,12 @@ struct RootView: View {
             SidebarView()
         } content: {
             if let board = store.selectedBoard {
-                BoardView(board: board, presentation: .mac)
+                switch workspaceMode {
+                case .board:
+                    BoardView(board: board, presentation: .mac)
+                case .hierarchy:
+                    HierarchyView(board: board, presentation: .mac)
+                }
             } else {
                 ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
             }
@@ -51,6 +57,9 @@ struct RootView: View {
         .searchable(text: $store.searchText, prompt: "Search beads")
         .toolbar {
             ToolbarItemGroup {
+                WorkspaceModePicker(selection: $workspaceMode)
+                    .disabled(store.selectedBoard == nil)
+
                 Menu {
                     Button("All Sources") {
                         store.sourceFilter = nil
@@ -195,6 +204,61 @@ struct RootView: View {
     }
 }
 
+private enum WorkspaceMode: String, CaseIterable, Identifiable {
+    case board
+    case hierarchy
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .board: "Board"
+        case .hierarchy: "Hierarchy"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .board: "rectangle.3.group"
+        case .hierarchy: "list.bullet.indent"
+        }
+    }
+}
+
+private struct WorkspaceModePicker: View {
+    @Binding var selection: WorkspaceMode
+
+    var body: some View {
+        Picker("View", selection: $selection) {
+            ForEach(WorkspaceMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 188)
+    }
+}
+
+private struct WorkspaceModeMenuButton: View {
+    @Binding var selection: WorkspaceMode
+
+    var body: some View {
+        Menu {
+            ForEach(WorkspaceMode.allCases) { mode in
+                Button {
+                    selection = mode
+                } label: {
+                    Label(mode.title, systemImage: mode == selection ? "checkmark" : mode.systemImage)
+                }
+            }
+        } label: {
+            Label(selection.title, systemImage: selection.systemImage)
+        }
+    }
+}
+
 #if os(iOS)
 private struct TabletRootView: View {
     @EnvironmentObject private var store: BoardStore
@@ -203,6 +267,7 @@ private struct TabletRootView: View {
     @State private var showingImportBoard = false
     @State private var showingNewBead = false
     @State private var showingConnectionSettings = false
+    @State private var workspaceMode: WorkspaceMode = .board
 
     var body: some View {
         GeometryReader { proxy in
@@ -211,14 +276,16 @@ private struct TabletRootView: View {
                     showingNewBoard: $showingNewBoard,
                     showingImportBoard: $showingImportBoard,
                     showingNewBead: $showingNewBead,
-                    showingConnectionSettings: $showingConnectionSettings
+                    showingConnectionSettings: $showingConnectionSettings,
+                    workspaceMode: $workspaceMode
                 )
             } else {
                 TabletPortraitWorkspace(
                     showingNewBoard: $showingNewBoard,
                     showingImportBoard: $showingImportBoard,
                     showingNewBead: $showingNewBead,
-                    showingConnectionSettings: $showingConnectionSettings
+                    showingConnectionSettings: $showingConnectionSettings,
+                    workspaceMode: $workspaceMode
                 )
             }
         }
@@ -266,13 +333,19 @@ private struct TabletPortraitWorkspace: View {
     @Binding var showingImportBoard: Bool
     @Binding var showingNewBead: Bool
     @Binding var showingConnectionSettings: Bool
+    @Binding var workspaceMode: WorkspaceMode
 
     var body: some View {
         NavigationSplitView {
             SidebarView()
         } content: {
             if let board = store.selectedBoard {
-                BoardView(board: board, presentation: .tabletPortrait)
+                switch workspaceMode {
+                case .board:
+                    BoardView(board: board, presentation: .tabletPortrait)
+                case .hierarchy:
+                    HierarchyView(board: board, presentation: .tabletPortrait)
+                }
             } else {
                 ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
             }
@@ -282,6 +355,9 @@ private struct TabletPortraitWorkspace: View {
         .searchable(text: $store.searchText, prompt: "Search beads")
         .toolbar {
             ToolbarItemGroup {
+                WorkspaceModePicker(selection: $workspaceMode)
+                    .disabled(store.selectedBoard == nil)
+
                 Button {
                     showingConnectionSettings = true
                 } label: {
@@ -309,13 +385,20 @@ private struct TabletLandscapeWorkspace: View {
     @Binding var showingImportBoard: Bool
     @Binding var showingNewBead: Bool
     @Binding var showingConnectionSettings: Bool
+    @Binding var workspaceMode: WorkspaceMode
 
     var body: some View {
         NavigationStack {
             HStack(spacing: 0) {
                 if let board = store.selectedBoard {
-                    BoardView(board: board, presentation: .tabletLandscape)
-                        .frame(maxWidth: .infinity)
+                    switch workspaceMode {
+                    case .board:
+                        BoardView(board: board, presentation: .tabletLandscape)
+                            .frame(maxWidth: .infinity)
+                    case .hierarchy:
+                        HierarchyView(board: board, presentation: .tabletLandscape)
+                            .frame(maxWidth: .infinity)
+                    }
                 } else {
                     ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
                         .frame(maxWidth: .infinity)
@@ -354,6 +437,9 @@ private struct TabletLandscapeWorkspace: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    WorkspaceModePicker(selection: $workspaceMode)
+                        .disabled(store.selectedBoard == nil)
+
                     Button {
                         showingConnectionSettings = true
                     } label: {
@@ -382,12 +468,18 @@ private struct CompactRootView: View {
     @State private var showingNewBead = false
     @State private var showingConnectionSettings = false
     @State private var selectedColumnID: BoardColumn.ID?
+    @State private var workspaceMode: WorkspaceMode = .board
 
     var body: some View {
         NavigationStack {
             Group {
                 if let board = store.selectedBoard {
-                    CompactBoardView(board: board, selectedColumnID: $selectedColumnID)
+                    switch workspaceMode {
+                    case .board:
+                        CompactBoardView(board: board, selectedColumnID: $selectedColumnID)
+                    case .hierarchy:
+                        HierarchyView(board: board, presentation: .compact)
+                    }
                 } else {
                     ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create a board to start tracking beads."))
                 }
@@ -403,6 +495,9 @@ private struct CompactRootView: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    WorkspaceModeMenuButton(selection: $workspaceMode)
+                        .disabled(store.selectedBoard == nil)
+
                     Button {
                         showingConnectionSettings = true
                     } label: {

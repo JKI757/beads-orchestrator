@@ -128,6 +128,16 @@ final class BoardStore: ObservableObject {
         }
     }
 
+    func visibleBeads(in board: Board) -> [Bead] {
+        board.columns.flatMap { visibleBeads(in: $0) }
+    }
+
+    func columnName(for bead: Bead) -> String? {
+        selectedBoard?.columns.first { column in
+            column.beads.contains { $0.id == bead.id }
+        }?.name
+    }
+
     func createBoard(name: String, repositoryName: String, repositoryPath: String? = nil) {
         let board = Board(
             name: name,
