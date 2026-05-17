@@ -76,7 +76,7 @@ final class BoardStore: ObservableObject {
     }
 
     func bead(beadsID: String) -> Bead? {
-        selectedBoardBeads.first { $0.beadsID == beadsID }
+        selectedBoardBeads.first { $0.relationshipID == beadsID || $0.beadsID == beadsID }
     }
 
     func parentBead(for bead: Bead) -> Bead? {
@@ -94,6 +94,12 @@ final class BoardStore: ObservableObject {
 
     func dependentBeads(for bead: Bead) -> [Bead] {
         beads(for: bead.dependentBeadsIDs)
+    }
+
+    func possibleParentBeads(excluding beadID: Bead.ID? = nil) -> [Bead] {
+        selectedBoardBeads
+            .filter { !$0.isArchived && $0.id != beadID }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     func visibleBeads(in column: BoardColumn) -> [Bead] {
@@ -229,25 +235,37 @@ final class BoardStore: ObservableObject {
         persist()
     }
 
-    func createBead(in columnID: BoardColumn.ID? = nil, draft: BeadDraft) {
-        guard let boardIndex = indexOfSelectedBoard else { return }
+    @discardableResult
+    func createBead(in columnID: BoardColumn.ID? = nil, draft: BeadDraft) -> Bead? {
+        guard let boardIndex = indexOfSelectedBoard else { return nil }
         let targetColumnID = columnID ?? selectedColumnID ?? boards[boardIndex].columns.first?.id
-        guard let columnIndex = boards[boardIndex].columns.firstIndex(where: { $0.id == targetColumnID }) else { return }
+        guard let columnIndex = boards[boardIndex].columns.firstIndex(where: { $0.id == targetColumnID }) else { return nil }
 
         let bead = draft.makeBead()
         boards[boardIndex].columns[columnIndex].beads.insert(bead, at: 0)
+        reconcileParentLink(for: bead, previousParentID: nil)
         boards[boardIndex].updatedAt = .now
         selectedBeadID = bead.id
         persist()
+        return bead
+    }
+
+    @discardableResult
+    func createChildBead(parent: Bead, draft: BeadDraft) -> Bead? {
+        var childDraft = draft
+        childDraft.parentBeadsID = parent.relationshipID
+        return createBead(draft: childDraft)
     }
 
     func updateBead(_ beadID: Bead.ID, with draft: BeadDraft) {
         guard let indexes = indexes(forBeadID: beadID) else { return }
+        let existingBead = boards[indexes.board].columns[indexes.column].beads[indexes.bead]
         var bead = draft.makeBead(id: beadID)
-        bead.createdAt = boards[indexes.board].columns[indexes.column].beads[indexes.bead].createdAt
-        bead.archivedAt = boards[indexes.board].columns[indexes.column].beads[indexes.bead].archivedAt
+        bead.createdAt = existingBead.createdAt
+        bead.archivedAt = existingBead.archivedAt
         bead.updatedAt = .now
         boards[indexes.board].columns[indexes.column].beads[indexes.bead] = bead
+        reconcileParentLink(for: bead, previousParentID: existingBead.parentBeadsID)
         boards[indexes.board].updatedAt = .now
         persist()
     }
@@ -408,12 +426,43 @@ final class BoardStore: ObservableObject {
 
     private func beads(for beadsIDs: [String]) -> [Bead] {
         let beadsByNativeID = Dictionary(
-            selectedBoardBeads.compactMap { bead in
-                bead.beadsID.map { ($0, bead) }
+            selectedBoardBeads.map { bead in
+                (bead.relationshipID, bead)
             },
             uniquingKeysWith: { existing, _ in existing }
         )
         return beadsIDs.compactMap { beadsByNativeID[$0] }
+    }
+
+    private func reconcileParentLink(for bead: Bead, previousParentID: String?) {
+        let childID = bead.relationshipID
+
+        if let previousParentID, previousParentID != bead.parentBeadsID {
+            mutateBead(relationshipID: previousParentID) { parent in
+                parent.childBeadsIDs.removeAll { $0 == childID }
+            }
+        }
+
+        if let parentID = bead.parentBeadsID {
+            mutateBead(relationshipID: parentID) { parent in
+                if !parent.childBeadsIDs.contains(childID) {
+                    parent.childBeadsIDs.append(childID)
+                    parent.childBeadsIDs.sort()
+                }
+            }
+        }
+    }
+
+    private func mutateBead(relationshipID: String, update: (inout Bead) -> Void) {
+        guard let boardIndex = indexOfSelectedBoard else { return }
+        for columnIndex in boards[boardIndex].columns.indices {
+            guard let beadIndex = boards[boardIndex].columns[columnIndex].beads.firstIndex(where: { $0.relationshipID == relationshipID }) else {
+                continue
+            }
+            update(&boards[boardIndex].columns[columnIndex].beads[beadIndex])
+            boards[boardIndex].columns[columnIndex].beads[beadIndex].updatedAt = .now
+            return
+        }
     }
 
     private static func loadBoards(from url: URL) -> [Board]? {

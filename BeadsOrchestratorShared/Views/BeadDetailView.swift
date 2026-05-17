@@ -8,7 +8,7 @@ struct BeadDetailView: View {
 
     var body: some View {
         Group {
-            if let bead {
+            if let bead = displayedBead {
                 #if os(macOS)
                 MacBeadInspector(bead: bead, showingEditor: $showingEditor)
                 #else
@@ -23,11 +23,115 @@ struct BeadDetailView: View {
             }
         }
     }
+
+    private var displayedBead: Bead? {
+        guard let bead else { return nil }
+        if store.selectedBeadID == bead.id {
+            return store.selectedBead ?? bead
+        }
+        return store.selectedBead ?? bead
+    }
 }
 
 enum BeadDetailPresentation {
     case automatic
     case tabletLandscape
+}
+
+private struct RelationshipControls: View {
+    @EnvironmentObject private var store: BoardStore
+    let bead: Bead
+    @State private var showingChildEditor = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                showingChildEditor = true
+            } label: {
+                Label("New Child Bead", systemImage: "plus.square.on.square")
+            }
+
+            if let parent = store.parentBead(for: bead) {
+                RelationshipButton(title: "Parent", bead: parent) {
+                    store.select(parent)
+                }
+            } else if let parentBeadsID = bead.parentBeadsID {
+                LabeledContent("Parent", value: parentBeadsID)
+            }
+
+            if !bead.childBeadsIDs.isEmpty {
+                RelationshipGroup(title: "Children", beads: store.childBeads(for: bead), missingIDs: missingIDs(bead.childBeadsIDs, resolved: store.childBeads(for: bead)))
+            }
+
+            if !bead.dependencyBeadsIDs.isEmpty {
+                RelationshipGroup(title: "Depends On", beads: store.dependencyBeads(for: bead), missingIDs: missingIDs(bead.dependencyBeadsIDs, resolved: store.dependencyBeads(for: bead)))
+            }
+
+            if !bead.dependentBeadsIDs.isEmpty {
+                RelationshipGroup(title: "Blocks", beads: store.dependentBeads(for: bead), missingIDs: missingIDs(bead.dependentBeadsIDs, resolved: store.dependentBeads(for: bead)))
+            }
+        }
+        .sheet(isPresented: $showingChildEditor) {
+            BeadEditorSheet(mode: .create(parent: bead))
+        }
+    }
+
+    private func missingIDs(_ ids: [String], resolved: [Bead]) -> [String] {
+        let resolvedIDs = Set(resolved.map(\.relationshipID))
+        return ids.filter { !resolvedIDs.contains($0) }
+    }
+}
+
+private struct RelationshipGroup: View {
+    @EnvironmentObject private var store: BoardStore
+    let title: String
+    let beads: [Bead]
+    let missingIDs: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(beads) { bead in
+                RelationshipButton(title: title, bead: bead) {
+                    store.select(bead)
+                }
+            }
+
+            ForEach(missingIDs, id: \.self) { missingID in
+                Text(missingID)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+private struct RelationshipButton: View {
+    let title: String
+    let bead: Bead
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Label(bead.title, systemImage: bead.issueType == "epic" ? "square.stack.3d.up" : "circle")
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let status = bead.status {
+                    Text(status.replacingOccurrences(of: "_", with: " "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title): \(bead.title)")
+    }
 }
 
 #if os(iOS)
@@ -80,6 +184,10 @@ private struct FormBeadInspector: View {
                 Section("Notes") {
                     Text(bead.notes)
                 }
+            }
+
+            Section("Relationships") {
+                RelationshipControls(bead: bead)
             }
 
             WorkflowSection(bead: bead)
@@ -153,6 +261,10 @@ private struct TabletLandscapeBeadInspector: View {
                         Text(bead.notes)
                             .font(.callout)
                     }
+                }
+
+                InspectorSection("Relationships") {
+                    RelationshipControls(bead: bead)
                 }
 
                 WorkflowSection(bead: bead)
@@ -302,6 +414,10 @@ private struct MacBeadInspector: View {
                             .font(.callout)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                }
+
+                InspectorSection("Relationships") {
+                    RelationshipControls(bead: bead)
                 }
 
                 InspectorSection("Workflow") {

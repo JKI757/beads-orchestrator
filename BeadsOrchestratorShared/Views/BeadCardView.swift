@@ -48,30 +48,33 @@ struct BeadCardView: View {
     }
 
     var body: some View {
-        Button {
-            store.select(bead)
-        } label: {
+        VStack(alignment: .leading, spacing: density == .dense ? 6 : 8) {
             BeadCardContent(bead: bead, density: density, showsSourceBadge: true)
-                .padding(density.padding)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                #if os(macOS)
-                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.14), lineWidth: isSelected ? 2 : 1)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                #else
-                .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                #endif
+            if density != .compact {
+                CardChildLinks(bead: bead)
+            }
         }
+        .padding(density.padding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .buttonStyle(.plain)
+        #if os(macOS)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.14), lineWidth: isSelected ? 2 : 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        #else
+        .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        #endif
+        .contentShape(Rectangle())
+        .onTapGesture {
+            store.select(bead)
+        }
         .contextMenu {
             if let board = store.selectedBoard {
                 Menu("Move To") {
@@ -85,6 +88,37 @@ struct BeadCardView: View {
 
             Button("Archive", role: .destructive) {
                 store.archiveBead(bead.id)
+            }
+        }
+    }
+}
+
+private struct CardChildLinks: View {
+    @EnvironmentObject private var store: BoardStore
+    let bead: Bead
+
+    var body: some View {
+        let children = store.childBeads(for: bead)
+        if !bead.childBeadsIDs.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                    Text("\(bead.childBeadsIDs.count) child\(bead.childBeadsIDs.count == 1 ? "" : "ren")")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+
+                ForEach(children.prefix(2)) { child in
+                    Button {
+                        store.select(child)
+                    } label: {
+                        Text(child.title)
+                            .font(.caption2)
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }

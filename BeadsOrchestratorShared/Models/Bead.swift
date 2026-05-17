@@ -111,6 +111,10 @@ struct Bead: Codable, Identifiable, Hashable {
         archivedAt != nil
     }
 
+    var relationshipID: String {
+        beadsID ?? id.uuidString
+    }
+
     var hasRelationshipMetadata: Bool {
         parentBeadsID != nil
             || !childBeadsIDs.isEmpty

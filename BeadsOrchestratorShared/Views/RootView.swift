@@ -159,7 +159,7 @@ struct RootView: View {
             BoardEditorSheet(mode: .importExisting)
         }
         .sheet(isPresented: $showingNewBead) {
-            BeadEditorSheet(mode: .create)
+            BeadEditorSheet(mode: .create(parent: nil))
         }
         .sheet(isPresented: $showingConnectionSettings) {
             ConnectionSettingsSheet()
@@ -229,7 +229,7 @@ private struct TabletRootView: View {
             BoardEditorSheet(mode: .importExisting)
         }
         .sheet(isPresented: $showingNewBead) {
-            BeadEditorSheet(mode: .create)
+            BeadEditorSheet(mode: .create(parent: nil))
         }
         .sheet(isPresented: $showingConnectionSettings) {
             ConnectionSettingsSheet()
@@ -426,7 +426,7 @@ private struct CompactRootView: View {
                 BoardEditorSheet(mode: .importExisting)
             }
             .sheet(isPresented: $showingNewBead) {
-                BeadEditorSheet(mode: .create)
+                BeadEditorSheet(mode: .create(parent: nil))
             }
             .sheet(isPresented: $showingConnectionSettings) {
                 ConnectionSettingsSheet()
@@ -528,6 +528,9 @@ private struct CompactBoardView: View {
                             BeadCardContent(bead: bead, density: .compact, showsSourceBadge: true)
                                 .padding(.vertical, 4)
                         }
+                        .simultaneousGesture(TapGesture().onEnded {
+                            store.select(bead)
+                        })
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     }
                 } header: {
@@ -1118,16 +1121,24 @@ private struct BoardEditorSheet: View {
 }
 
 enum BeadEditorMode {
-    case create
+    case create(parent: Bead?)
     case edit(Bead)
 
     var title: String {
         switch self {
-        case .create: "New Bead"
+        case .create(let parent): parent == nil ? "New Bead" : "New Child Bead"
         case .edit: "Edit Bead"
         }
     }
 
+    var editingBeadID: Bead.ID? {
+        switch self {
+        case .create:
+            nil
+        case .edit(let bead):
+            bead.id
+        }
+    }
 }
 
 struct BeadEditorSheet: View {
@@ -1140,8 +1151,10 @@ struct BeadEditorSheet: View {
     init(mode: BeadEditorMode) {
         self.mode = mode
         switch mode {
-        case .create:
-            _draft = State(initialValue: BeadDraft())
+        case .create(let parent):
+            var draft = BeadDraft()
+            draft.parentBeadsID = parent?.relationshipID
+            _draft = State(initialValue: draft)
         case .edit(let bead):
             _draft = State(initialValue: BeadDraft(bead: bead))
         }
@@ -1173,6 +1186,28 @@ struct BeadEditorSheet: View {
                     TextField("Pull Request", value: $draft.pullRequestNumber, format: .number)
                 }
 
+                Section("Relationships") {
+                    Picker("Parent", selection: Binding(
+                        get: { draft.parentBeadsID ?? "" },
+                        set: { draft.parentBeadsID = $0.nilIfBlank }
+                    )) {
+                        Text("None").tag("")
+                        ForEach(store.possibleParentBeads(excluding: mode.editingBeadID)) { bead in
+                            Text(bead.title).tag(bead.relationshipID)
+                        }
+                    }
+
+                    if !draft.childBeadsIDs.isEmpty {
+                        LabeledContent("Children", value: "\(draft.childBeadsIDs.count)")
+                    }
+                    if !draft.dependencyBeadsIDs.isEmpty {
+                        LabeledContent("Depends On", value: "\(draft.dependencyBeadsIDs.count)")
+                    }
+                    if !draft.dependentBeadsIDs.isEmpty {
+                        LabeledContent("Blocks", value: "\(draft.dependentBeadsIDs.count)")
+                    }
+                }
+
                 Section("Status") {
                     Toggle("Blocked", isOn: $draft.isBlocked)
                     Toggle("Stale", isOn: $draft.isStale)
@@ -1193,8 +1228,12 @@ struct BeadEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         switch mode {
-                        case .create:
-                            store.createBead(draft: draft)
+                        case .create(let parent):
+                            if let parent {
+                                store.createChildBead(parent: parent, draft: draft)
+                            } else {
+                                store.createBead(draft: draft)
+                            }
                         case .edit(let bead):
                             store.updateBead(bead.id, with: draft)
                         }
@@ -1204,7 +1243,14 @@ struct BeadEditorSheet: View {
             }
         }
         #if os(macOS)
-        .frame(minWidth: 460, minHeight: 520)
+        .frame(minWidth: 460, minHeight: 560)
         #endif
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }
