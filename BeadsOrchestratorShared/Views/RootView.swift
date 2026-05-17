@@ -625,7 +625,9 @@ private struct ConnectionSettingsSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 420, minHeight: 320)
+        #endif
         .onAppear {
             serverURLString = store.remoteConfiguration.serverURLString
             pairingToken = store.remoteConfiguration.pairingToken
@@ -865,7 +867,9 @@ private struct BoardEditorSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 420, minHeight: 240)
+        #endif
     }
 }
 
@@ -954,6 +958,8 @@ struct BeadEditorSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(minWidth: 460, minHeight: 520)
+        #endif
     }
 }
