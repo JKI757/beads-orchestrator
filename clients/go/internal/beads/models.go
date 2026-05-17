@@ -198,11 +198,36 @@ type AIPMDecisionProposal struct {
 }
 
 type AIPMReportSnapshot struct {
-	ID          string                    `json:"id"`
-	Title       string                    `json:"title"`
-	Summary     string                    `json:"summary"`
-	Sections    []BeadStatusReportSection `json:"sections"`
-	GeneratedAt time.Time                 `json:"generatedAt"`
+	ID            string                    `json:"id"`
+	Title         string                    `json:"title"`
+	Summary       string                    `json:"summary"`
+	Deltas        AIPMReportDeltas          `json:"deltas"`
+	Sections      []BeadStatusReportSection `json:"sections"`
+	BoardSnapshot *AIPMBoardSnapshot        `json:"boardSnapshot,omitempty"`
+	GeneratedAt   time.Time                 `json:"generatedAt"`
+}
+
+type AIPMReportDeltas struct {
+	Progress  []string `json:"progress"`
+	Risks     []string `json:"risks"`
+	Blockers  []string `json:"blockers"`
+	Decisions []string `json:"decisions"`
+}
+
+type AIPMBoardSnapshot struct {
+	BoardID     string                  `json:"boardID"`
+	BoardName   string                  `json:"boardName"`
+	Beads       []AIPMBoardSnapshotBead `json:"beads"`
+	GeneratedAt time.Time               `json:"generatedAt"`
+}
+
+type AIPMBoardSnapshotBead struct {
+	RelationshipID string `json:"relationshipID"`
+	Title          string `json:"title"`
+	Status         string `json:"status"`
+	Priority       string `json:"priority"`
+	IsBlocked      bool   `json:"isBlocked"`
+	IsStale        bool   `json:"isStale"`
 }
 
 type AIPMAuditEvent struct {

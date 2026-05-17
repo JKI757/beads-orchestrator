@@ -493,22 +493,100 @@ struct AIPMReportSnapshot: Codable, Equatable, Identifiable {
     var id: UUID
     var title: String
     var summary: String
+    var deltas: AIPMReportDeltas
     var sections: [BeadStatusReportSection]
+    var boardSnapshot: AIPMBoardSnapshot?
     var generatedAt: Date
 
     init(
         id: UUID = UUID(),
         title: String,
         summary: String,
+        deltas: AIPMReportDeltas = AIPMReportDeltas(),
         sections: [BeadStatusReportSection],
+        boardSnapshot: AIPMBoardSnapshot? = nil,
         generatedAt: Date = .now
     ) {
         self.id = id
         self.title = title
         self.summary = summary
+        self.deltas = deltas
         self.sections = sections
+        self.boardSnapshot = boardSnapshot
         self.generatedAt = generatedAt
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case summary
+        case deltas
+        case sections
+        case boardSnapshot
+        case generatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        title = try container.decode(String.self, forKey: .title)
+        summary = try container.decode(String.self, forKey: .summary)
+        deltas = try container.decodeIfPresent(AIPMReportDeltas.self, forKey: .deltas) ?? AIPMReportDeltas()
+        sections = try container.decodeIfPresent([BeadStatusReportSection].self, forKey: .sections) ?? []
+        boardSnapshot = try container.decodeIfPresent(AIPMBoardSnapshot.self, forKey: .boardSnapshot)
+        generatedAt = try container.decodeIfPresent(Date.self, forKey: .generatedAt) ?? .now
+    }
+}
+
+struct AIPMReportDeltas: Codable, Equatable {
+    var progress: [String]
+    var risks: [String]
+    var blockers: [String]
+    var decisions: [String]
+
+    init(
+        progress: [String] = [],
+        risks: [String] = [],
+        blockers: [String] = [],
+        decisions: [String] = []
+    ) {
+        self.progress = progress
+        self.risks = risks
+        self.blockers = blockers
+        self.decisions = decisions
+    }
+
+    var isEmpty: Bool {
+        progress.isEmpty && risks.isEmpty && blockers.isEmpty && decisions.isEmpty
+    }
+}
+
+struct AIPMBoardSnapshot: Codable, Equatable {
+    var boardID: Board.ID
+    var boardName: String
+    var beads: [AIPMBoardSnapshotBead]
+    var generatedAt: Date
+
+    init(
+        boardID: Board.ID,
+        boardName: String,
+        beads: [AIPMBoardSnapshotBead],
+        generatedAt: Date = .now
+    ) {
+        self.boardID = boardID
+        self.boardName = boardName
+        self.beads = beads
+        self.generatedAt = generatedAt
+    }
+}
+
+struct AIPMBoardSnapshotBead: Codable, Equatable {
+    var relationshipID: String
+    var title: String
+    var status: String
+    var priority: BeadPriority
+    var isBlocked: Bool
+    var isStale: Bool
 }
 
 struct AIPMAuditEvent: Codable, Equatable, Identifiable {

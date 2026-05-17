@@ -330,6 +330,60 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertTrue(state.needsAttention)
     }
 
+    func testAIPMReportSnapshotDecodesLegacyReportAndPersistsDeltas() throws {
+        let legacyJSON = """
+        {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "title": "Daily PM Report",
+          "summary": "One decision pending.",
+          "sections": [
+            { "title": "Decisions", "items": ["Pick launch scope"] }
+          ],
+          "generatedAt": "2026-05-17T16:00:00Z"
+        }
+        """
+
+        let legacyReport = try BeadsJSON.decoder.decode(AIPMReportSnapshot.self, from: Data(legacyJSON.utf8))
+        XCTAssertTrue(legacyReport.deltas.isEmpty)
+        XCTAssertNil(legacyReport.boardSnapshot)
+
+        let report = AIPMReportSnapshot(
+            title: "Recurring PM Report",
+            summary: "Progress and risks changed since the last run.",
+            deltas: AIPMReportDeltas(
+                progress: ["BO-1 moved from Backlog to In Progress"],
+                risks: ["BO-2 became stale"],
+                blockers: ["BO-3 is newly blocked"],
+                decisions: ["High: Pick release scope"]
+            ),
+            sections: [
+                BeadStatusReportSection(title: "Progress", items: ["BO-1 moved from Backlog to In Progress"])
+            ],
+            boardSnapshot: AIPMBoardSnapshot(
+                boardID: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+                boardName: "Harness",
+                beads: [
+                    AIPMBoardSnapshotBead(
+                        relationshipID: "BO-1",
+                        title: "Build feature",
+                        status: "In Progress",
+                        priority: .normal,
+                        isBlocked: false,
+                        isStale: false
+                    )
+                ]
+            )
+        )
+
+        let data = try BeadsJSON.encoder.encode(report)
+        let decoded = try BeadsJSON.decoder.decode(AIPMReportSnapshot.self, from: data)
+        XCTAssertEqual(decoded.deltas.progress, ["BO-1 moved from Backlog to In Progress"])
+        XCTAssertEqual(decoded.deltas.risks, ["BO-2 became stale"])
+        XCTAssertEqual(decoded.deltas.blockers, ["BO-3 is newly blocked"])
+        XCTAssertEqual(decoded.deltas.decisions, ["High: Pick release scope"])
+        XCTAssertEqual(decoded.boardSnapshot?.beads.first?.relationshipID, "BO-1")
+    }
+
     private func temporaryFile(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("BeadsOrchestratorTests-\(UUID().uuidString)", isDirectory: true)

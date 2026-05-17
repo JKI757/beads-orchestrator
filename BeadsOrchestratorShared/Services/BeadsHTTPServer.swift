@@ -472,6 +472,11 @@ final class BeadsHTTPServer: ObservableObject {
             throw LLMProviderError.unavailable("The LLM endpoint URL is invalid.")
         }
 
+        let board = try aiPMBoard(request: request, store: store)
+        let currentSnapshot = aiPMBoardSnapshot(for: board)
+        let previousSnapshot = aiPMState.state.reports
+            .compactMap(\.boardSnapshot)
+            .first { $0.boardID == board.id }
         let intelligence = try projectIntelligenceSummary(request: request, store: store)
         let prompt = try aiPMPrompt(request: request, settings: settings, store: store, intelligence: intelligence)
         let llmResponse = try await requestLLMJSON(
@@ -494,11 +499,19 @@ final class BeadsHTTPServer: ObservableObject {
                         changes: proposal.changes ?? []
                     )
                 }
+            let deltas = aiPMReportDeltas(
+                previous: previousSnapshot,
+                current: currentSnapshot,
+                proposals: proposals,
+                intelligence: intelligence
+            )
             let report = payload.report.map { report in
                 AIPMReportSnapshot(
                     title: report.title,
                     summary: report.summary,
-                    sections: report.sections
+                    deltas: deltas,
+                    sections: categorizedReportSections(deltas: deltas, providerSections: report.sections),
+                    boardSnapshot: currentSnapshot
                 )
             }
             aiPMState.recordRun(
@@ -512,6 +525,149 @@ final class BeadsHTTPServer: ObservableObject {
             llmConfiguration.recordProviderFailure("The provider returned an AI PM run in an unreadable format.")
             throw LLMProviderError.invalidResponse
         }
+    }
+
+    private func aiPMBoard(request: AIPMRunRequest, store: BoardStore) throws -> Board {
+        let board = request.boardID.flatMap { boardID in
+            store.boards.first { $0.id == boardID }
+        } ?? store.selectedBoard
+        guard let board else {
+            throw LLMProviderError.unavailable("No board context is available.")
+        }
+        return board
+    }
+
+    private func aiPMBoardSnapshot(for board: Board) -> AIPMBoardSnapshot {
+        let statusByBeadID = Dictionary(
+            uniqueKeysWithValues: board.columns.flatMap { column in
+                column.beads.map { bead in (bead.id, bead.status ?? column.name) }
+            }
+        )
+        let beads = board.columns
+            .flatMap(\.beads)
+            .filter { !$0.isArchived }
+            .map { bead in
+                AIPMBoardSnapshotBead(
+                    relationshipID: bead.relationshipID,
+                    title: bead.title,
+                    status: statusByBeadID[bead.id] ?? "Unknown",
+                    priority: bead.priority,
+                    isBlocked: bead.isBlocked,
+                    isStale: bead.isStale
+                )
+            }
+        return AIPMBoardSnapshot(boardID: board.id, boardName: board.name, beads: beads)
+    }
+
+    private func aiPMReportDeltas(
+        previous: AIPMBoardSnapshot?,
+        current: AIPMBoardSnapshot,
+        proposals: [AIPMDecisionProposal],
+        intelligence: AIPMProjectIntelligenceSummary
+    ) -> AIPMReportDeltas {
+        guard let previous else {
+            return AIPMReportDeltas(
+                progress: ["Baseline captured for \(current.beads.count) active bead\(current.beads.count == 1 ? "" : "s")."],
+                risks: intelligence.signals
+                    .filter { $0.severity == .warning || $0.severity == .critical }
+                    .prefix(5)
+                    .map { $0.title },
+                blockers: current.beads
+                    .filter(\.isBlocked)
+                    .prefix(5)
+                    .map { "\($0.relationshipID): \($0.title)" },
+                decisions: proposalDecisionItems(proposals)
+            )
+        }
+
+        let previousByID = Dictionary(
+            previous.beads.map { ($0.relationshipID, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+        let currentByID = Dictionary(
+            current.beads.map { ($0.relationshipID, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+
+        let progress = current.beads.compactMap { bead -> String? in
+            guard let old = previousByID[bead.relationshipID] else {
+                return "New active bead \(bead.relationshipID): \(bead.title)"
+            }
+            if old.status != bead.status {
+                return "\(bead.relationshipID) moved from \(old.status) to \(bead.status)"
+            }
+            if old.isBlocked && !bead.isBlocked {
+                return "\(bead.relationshipID) is no longer blocked"
+            }
+            return nil
+        }
+
+        let removed = previous.beads
+            .filter { currentByID[$0.relationshipID] == nil }
+            .map { "\($0.relationshipID) left the active board: \($0.title)" }
+
+        let risks = current.beads.compactMap { bead -> String? in
+            guard let old = previousByID[bead.relationshipID] else {
+                if bead.priority == .urgent || bead.isStale {
+                    return "\(bead.relationshipID): new \(bead.priority.rawValue) or stale work needs review"
+                }
+                return nil
+            }
+            if !old.isStale && bead.isStale {
+                return "\(bead.relationshipID) became stale"
+            }
+            if old.priority != .urgent && bead.priority == .urgent {
+                return "\(bead.relationshipID) escalated to urgent"
+            }
+            return nil
+        }
+
+        let blockers = current.beads.compactMap { bead -> String? in
+            let wasBlocked = previousByID[bead.relationshipID]?.isBlocked ?? false
+            guard !wasBlocked && bead.isBlocked else { return nil }
+            return "\(bead.relationshipID) is newly blocked: \(bead.title)"
+        }
+
+        let resolvedBlockers = current.beads.compactMap { bead -> String? in
+            guard previousByID[bead.relationshipID]?.isBlocked == true, !bead.isBlocked else { return nil }
+            return "\(bead.relationshipID) blocker resolved: \(bead.title)"
+        }
+
+        return AIPMReportDeltas(
+            progress: Array((progress + removed + resolvedBlockers).prefix(8)),
+            risks: Array(risks.prefix(8)),
+            blockers: Array(blockers.prefix(8)),
+            decisions: proposalDecisionItems(proposals)
+        )
+    }
+
+    private func proposalDecisionItems(_ proposals: [AIPMDecisionProposal]) -> [String] {
+        proposals
+            .filter { $0.category == .decision || $0.category == .risk || $0.risk == .high }
+            .prefix(8)
+            .map { "\($0.risk.rawValue.capitalized): \($0.title)" }
+    }
+
+    private func categorizedReportSections(
+        deltas: AIPMReportDeltas,
+        providerSections: [BeadStatusReportSection]
+    ) -> [BeadStatusReportSection] {
+        var sections: [BeadStatusReportSection] = []
+        if !deltas.progress.isEmpty {
+            sections.append(BeadStatusReportSection(title: "Progress", items: deltas.progress))
+        }
+        if !deltas.risks.isEmpty {
+            sections.append(BeadStatusReportSection(title: "Risks", items: deltas.risks))
+        }
+        if !deltas.blockers.isEmpty {
+            sections.append(BeadStatusReportSection(title: "Blockers", items: deltas.blockers))
+        }
+        if !deltas.decisions.isEmpty {
+            sections.append(BeadStatusReportSection(title: "Decisions", items: deltas.decisions))
+        }
+        let existingTitles = Set(sections.map(\.title))
+        sections.append(contentsOf: providerSections.filter { !existingTitles.contains($0.title) })
+        return sections
     }
 
     private func requestLLMJSON(
@@ -877,6 +1033,17 @@ final class BeadsHTTPServer: ObservableObject {
                 "\(proposal.category.rawValue) / \(proposal.risk.rawValue): \(proposal.title) - \(proposal.summary)"
             }
             .joined(separator: "\n")
+        let previousReport = aiPMState.state.reports.first { $0.boardSnapshot?.boardID == board.id }
+        let previousSnapshotSummary = previousReport.flatMap { report -> String? in
+            guard let snapshot = report.boardSnapshot else { return nil }
+            return [
+                "lastReport=\(report.generatedAt.formatted(date: .abbreviated, time: .shortened))",
+                "summary=\(report.summary)",
+                "activeBeads=\(snapshot.beads.count)",
+                "blocked=\(snapshot.beads.filter(\.isBlocked).count)",
+                "stale=\(snapshot.beads.filter(\.isStale).count)"
+            ].joined(separator: " | ")
+        } ?? "No previous AI PM report snapshot for this board."
 
         return """
         Act as an autonomous AI project manager for a software project. Inspect the canonical board state and decide what needs PM attention without asking the user to write prompts.
@@ -945,6 +1112,9 @@ final class BeadsHTTPServer: ObservableObject {
 
         Deterministic project intelligence:
         \(projectIntelligencePromptContext(intelligence))
+
+        Previous AI PM report snapshot:
+        \(previousSnapshotSummary)
 
         Beads:
         \(context.isEmpty ? "No active beads." : context)
