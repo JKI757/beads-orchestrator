@@ -702,45 +702,30 @@ struct HierarchyView: View {
     @EnvironmentObject private var store: BoardStore
     let board: Board
     var presentation: HierarchyPresentation
-    @State private var expandedIDs: Set<String> = []
-    @State private var initializedBoardID: Board.ID?
 
     private var isCompact: Bool {
         presentation == .compact
     }
 
-    private var rows: [HierarchyRowNode] {
-        HierarchyOutlineBuilder.rows(
+    private var graph: HierarchyGraph {
+        HierarchyGraphBuilder.graph(
             from: store.visibleBeads(in: board),
-            expandedIDs: expandedIDs
+            presentation: presentation
         )
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HierarchyHeader(board: board, isCompact: isCompact)
+            HierarchyHeader(board: board, graph: graph, isCompact: isCompact)
 
-            if rows.isEmpty {
-                ContentUnavailableView("No Beads", systemImage: "list.bullet.indent", description: Text("No beads match the current filters."))
+            if graph.nodes.isEmpty {
+                ContentUnavailableView("No Beads", systemImage: "point.3.connected.trianglepath.dotted", description: Text("No beads match the current filters."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    ForEach(rows) { node in
-                        HierarchyRowLink(
-                            node: node,
-                            presentation: presentation,
-                            isExpanded: expandedIDs.contains(node.bead.relationshipID),
-                            toggleExpansion: {
-                                toggleExpansion(for: node.bead)
-                            }
-                        )
-                        .listRowInsets(rowInsets(for: node.depth))
-                    }
-                }
+                HierarchyGraphView(graph: graph, presentation: presentation)
                 #if os(macOS)
-                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .background(Color(nsColor: .underPageBackgroundColor))
                 #else
-                .listStyle(.insetGrouped)
                 .refreshable {
                     await store.pullFromRemoteServer()
                 }
@@ -756,50 +741,13 @@ struct HierarchyView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .navigationTitle(board.name)
-        .onAppear {
-            initializeExpansion()
-        }
-        .onChange(of: board.id) {
-            initializeExpansion(reset: true)
-        }
-        .onChange(of: board.updatedAt) {
-            initializeExpansion()
-        }
-    }
-
-    private func toggleExpansion(for bead: Bead) {
-        let relationshipID = bead.relationshipID
-        if expandedIDs.contains(relationshipID) {
-            expandedIDs.remove(relationshipID)
-        } else {
-            expandedIDs.insert(relationshipID)
-        }
-    }
-
-    private func initializeExpansion(reset: Bool = false) {
-        let parentIDs = Set(
-            store.visibleBeads(in: board)
-                .filter { !$0.childBeadsIDs.isEmpty }
-                .map(\.relationshipID)
-        )
-
-        if reset || initializedBoardID != board.id {
-            expandedIDs = parentIDs
-            initializedBoardID = board.id
-        } else {
-            expandedIDs.formUnion(parentIDs)
-        }
-    }
-
-    private func rowInsets(for depth: Int) -> EdgeInsets {
-        let leading = (isCompact ? 12 : 16) + CGFloat(min(depth, 5)) * (isCompact ? 18 : 22)
-        return EdgeInsets(top: 6, leading: leading, bottom: 6, trailing: isCompact ? 12 : 16)
     }
 }
 
 private struct HierarchyHeader: View {
     @EnvironmentObject private var store: BoardStore
     let board: Board
+    let graph: HierarchyGraph
     let isCompact: Bool
 
     var body: some View {
@@ -815,12 +763,15 @@ private struct HierarchyHeader: View {
 
             Spacer()
 
-            Text("\(store.visibleBeads(in: board).count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(.quaternary, in: Capsule())
+            HStack(spacing: 6) {
+                HierarchyLegendItem(label: "\(store.visibleBeads(in: board).count)", systemImage: "circle.grid.2x2", color: .secondary)
+                if graph.parentEdgeCount > 0 {
+                    HierarchyLegendItem(label: "\(graph.parentEdgeCount)", systemImage: "point.topleft.down.curvedto.point.bottomright.up", color: .blue)
+                }
+                if graph.dependencyEdgeCount > 0 {
+                    HierarchyLegendItem(label: "\(graph.dependencyEdgeCount)", systemImage: "arrow.right", color: .red)
+                }
+            }
 
             StatusReportButton(board: board, compact: true)
         }
@@ -839,87 +790,142 @@ private struct HierarchyHeader: View {
     }
 }
 
-private struct HierarchyRowLink: View {
-    @EnvironmentObject private var store: BoardStore
-    let node: HierarchyRowNode
-    let presentation: HierarchyPresentation
-    let isExpanded: Bool
-    let toggleExpansion: () -> Void
+private struct HierarchyLegendItem: View {
+    let label: String
+    let systemImage: String
+    let color: Color
 
     var body: some View {
-        #if os(iOS)
-        if presentation == .compact {
-            NavigationLink {
-                BeadDetailView(bead: node.bead)
-            } label: {
-                row
-            }
-            .simultaneousGesture(TapGesture().onEnded {
-                store.select(node.bead)
-            })
-        } else {
-            Button {
-                store.select(node.bead)
-            } label: {
-                row
-            }
-            .buttonStyle(.plain)
-        }
-        #else
-        Button {
-            store.select(node.bead)
-        } label: {
-            row
-        }
-        .buttonStyle(.plain)
-        #endif
-    }
-
-    private var row: some View {
-        HierarchyRow(
-            node: node,
-            isExpanded: isExpanded,
-            statusText: node.bead.status ?? store.columnName(for: node.bead) ?? "No status",
-            isSelected: store.selectedBeadID == node.bead.id,
-            toggleExpansion: toggleExpansion
-        )
+        Label(label, systemImage: systemImage)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(color)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.10), in: Capsule())
     }
 }
 
-private struct HierarchyRow: View {
-    let node: HierarchyRowNode
-    let isExpanded: Bool
-    let statusText: String
-    let isSelected: Bool
-    let toggleExpansion: () -> Void
+private struct HierarchyGraphView: View {
+    let graph: HierarchyGraph
+    let presentation: HierarchyPresentation
+    private var isCompact: Bool { presentation == .compact }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: node.hasChildren ? (isExpanded ? "chevron.down" : "chevron.right") : "circle.fill")
-                .font(node.hasChildren ? .caption.weight(.semibold) : .system(size: 5))
-                .foregroundStyle(node.hasChildren ? Color.accentColor : Color.secondary.opacity(0.55))
-                .frame(width: 18, height: 22)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    guard node.hasChildren else { return }
-                    toggleExpansion()
-                }
-                .accessibilityLabel(node.hasChildren ? (isExpanded ? "Collapse" : "Expand") : "No children")
-                .accessibilityAddTraits(node.hasChildren ? .isButton : [])
+        GeometryReader { proxy in
+            ScrollView([.horizontal, .vertical]) {
+                ZStack(alignment: .topLeading) {
+                    HierarchyEdgeCanvas(graph: graph)
 
+                    ForEach(graph.nodes) { node in
+                        HierarchyGraphNodeView(node: node, isCompact: isCompact)
+                            .frame(width: graph.metrics.nodeWidth, height: graph.metrics.nodeHeight)
+                            .position(x: node.frame.midX, y: node.frame.midY)
+                    }
+                }
+                .frame(
+                    width: max(graph.canvasSize.width, proxy.size.width),
+                    height: max(graph.canvasSize.height, proxy.size.height),
+                    alignment: .topLeading
+                )
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+            }
+        }
+    }
+}
+
+private struct HierarchyEdgeCanvas: View {
+    let graph: HierarchyGraph
+
+    var body: some View {
+        Canvas { context, _ in
+            let framesByID = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.id, $0.frame) })
+
+            for edge in graph.edges {
+                guard let fromFrame = framesByID[edge.fromID], let toFrame = framesByID[edge.toID] else { continue }
+
+                let from = edgeStartPoint(fromFrame: fromFrame, toFrame: toFrame)
+                let to = edgeEndPoint(fromFrame: fromFrame, toFrame: toFrame)
+                var path = Path()
+                path.move(to: from)
+
+                let controlOffset = max(50, abs(to.x - from.x) * 0.42)
+                path.addCurve(
+                    to: to,
+                    control1: CGPoint(x: from.x + controlOffset, y: from.y),
+                    control2: CGPoint(x: to.x - controlOffset, y: to.y)
+                )
+
+                context.stroke(
+                    path,
+                    with: .color(edge.color),
+                    style: StrokeStyle(
+                        lineWidth: edge.kind == .dependency ? 2.2 : 1.5,
+                        lineCap: .round,
+                        lineJoin: .round,
+                        dash: edge.kind == .dependency ? [] : [5, 4]
+                    )
+                )
+
+                drawArrowhead(in: context, tip: to, from: from, color: edge.color)
+            }
+        }
+        .frame(width: graph.canvasSize.width, height: graph.canvasSize.height)
+        .allowsHitTesting(false)
+    }
+
+    private func edgeStartPoint(fromFrame: CGRect, toFrame: CGRect) -> CGPoint {
+        if toFrame.midX >= fromFrame.midX {
+            CGPoint(x: fromFrame.maxX, y: fromFrame.midY)
+        } else {
+            CGPoint(x: fromFrame.minX, y: fromFrame.midY)
+        }
+    }
+
+    private func edgeEndPoint(fromFrame: CGRect, toFrame: CGRect) -> CGPoint {
+        if toFrame.midX >= fromFrame.midX {
+            CGPoint(x: toFrame.minX, y: toFrame.midY)
+        } else {
+            CGPoint(x: toFrame.maxX, y: toFrame.midY)
+        }
+    }
+
+    private func drawArrowhead(in context: GraphicsContext, tip: CGPoint, from: CGPoint, color: Color) {
+        let pointsRight = tip.x >= from.x
+        let direction: CGFloat = pointsRight ? -1 : 1
+        var arrow = Path()
+        arrow.move(to: tip)
+        arrow.addLine(to: CGPoint(x: tip.x + direction * 8, y: tip.y - 5))
+        arrow.move(to: tip)
+        arrow.addLine(to: CGPoint(x: tip.x + direction * 8, y: tip.y + 5))
+        context.stroke(arrow, with: .color(color), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+    }
+}
+
+private struct HierarchyGraphNodeView: View {
+    @EnvironmentObject private var store: BoardStore
+    let node: HierarchyGraphNode
+    let isCompact: Bool
+
+    private var statusText: String {
+        node.bead.status ?? store.columnName(for: node.bead) ?? "No status"
+    }
+
+    private var isSelected: Bool {
+        store.selectedBeadID == node.bead.id
+    }
+
+    var body: some View {
+        Button {
+            store.select(node.bead)
+        } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(node.bead.title)
-                        .font(.callout.weight(.semibold))
+                        .font(isCompact ? .caption.weight(.semibold) : .callout.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
-
-                    if node.hasChildren {
-                        Label("\(node.childCount)", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .labelStyle(.titleAndIcon)
-                    }
 
                     Spacer(minLength: 8)
 
@@ -937,23 +943,55 @@ private struct HierarchyRow: View {
                     HierarchyChip(text: node.bead.issueType ?? node.bead.sourceType.displayName, systemImage: "tag")
                     HierarchyChip(text: statusText, systemImage: "circle.dotted")
                     HierarchyChip(text: node.bead.priority.rawValue.capitalized, systemImage: "flag")
+                }
+
+                HStack(spacing: 6) {
+                    if node.childCount > 0 {
+                        HierarchyChip(text: "\(node.childCount) child\(node.childCount == 1 ? "" : "ren")", systemImage: "point.topleft.down.curvedto.point.bottomright.up", color: .blue)
+                    }
+
+                    if node.dependencyCount > 0 {
+                        HierarchyChip(text: "\(node.dependencyCount) blocker\(node.dependencyCount == 1 ? "" : "s")", systemImage: "arrow.left", color: .red)
+                    }
+
+                    if node.dependentCount > 0 {
+                        HierarchyChip(text: "\(node.dependentCount) blocked", systemImage: "arrow.right", color: .orange)
+                    }
 
                     if node.bead.isStale {
                         HierarchyChip(text: "Stale", systemImage: "clock", color: .orange)
                     }
                 }
             }
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if isSelected {
+            .padding(isCompact ? 9 : 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background {
+                #if os(macOS)
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.12))
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                #else
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                #endif
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: isCompact ? 7 : 8, style: .continuous)
+                    .stroke(borderColor, lineWidth: isSelected ? 2 : 1)
             }
         }
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
+        .accessibilityLabel(Text("\(node.bead.title), \(statusText)"))
+    }
+
+    private var borderColor: Color {
+        if isSelected {
+            Color.accentColor
+        } else if node.bead.isBlocked {
+            Color.red.opacity(0.38)
+        } else {
+            Color.secondary.opacity(0.18)
+        }
     }
 }
 
@@ -973,72 +1011,207 @@ private struct HierarchyChip: View {
     }
 }
 
-private struct HierarchyRowNode: Identifiable {
+private struct HierarchyGraph {
+    let nodes: [HierarchyGraphNode]
+    let edges: [HierarchyGraphEdge]
+    let metrics: HierarchyGraphMetrics
+    let canvasSize: CGSize
+
+    var parentEdgeCount: Int {
+        edges.filter { $0.kind == .parent }.count
+    }
+
+    var dependencyEdgeCount: Int {
+        edges.filter { $0.kind == .dependency }.count
+    }
+}
+
+private struct HierarchyGraphNode: Identifiable {
     let bead: Bead
-    let depth: Int
-    let hasChildren: Bool
+    let frame: CGRect
     let childCount: Int
+    let dependencyCount: Int
+    let dependentCount: Int
 
     var id: String {
         bead.relationshipID
     }
 }
 
-private enum HierarchyOutlineBuilder {
-    static func rows(from beads: [Bead], expandedIDs: Set<String>) -> [HierarchyRowNode] {
+private struct HierarchyGraphEdge: Identifiable, Hashable {
+    enum Kind {
+        case parent
+        case dependency
+    }
+
+    let fromID: String
+    let toID: String
+    let kind: Kind
+    let isBlocked: Bool
+
+    var id: String {
+        "\(kind)-\(fromID)-\(toID)"
+    }
+
+    var color: Color {
+        switch kind {
+        case .parent:
+            Color.blue.opacity(0.46)
+        case .dependency:
+            isBlocked ? Color.red.opacity(0.78) : Color.orange.opacity(0.68)
+        }
+    }
+}
+
+private struct HierarchyGraphMetrics {
+    let nodeWidth: CGFloat
+    let nodeHeight: CGFloat
+    let columnGap: CGFloat
+    let rowGap: CGFloat
+    let inset: CGFloat
+
+    static func metrics(for presentation: HierarchyPresentation) -> HierarchyGraphMetrics {
+        switch presentation {
+        case .compact:
+            HierarchyGraphMetrics(nodeWidth: 236, nodeHeight: 118, columnGap: 70, rowGap: 18, inset: 18)
+        case .tabletPortrait:
+            HierarchyGraphMetrics(nodeWidth: 270, nodeHeight: 124, columnGap: 84, rowGap: 22, inset: 22)
+        case .tabletLandscape:
+            HierarchyGraphMetrics(nodeWidth: 280, nodeHeight: 124, columnGap: 96, rowGap: 22, inset: 24)
+        case .mac:
+            HierarchyGraphMetrics(nodeWidth: 300, nodeHeight: 128, columnGap: 106, rowGap: 24, inset: 26)
+        }
+    }
+}
+
+private enum HierarchyGraphBuilder {
+    static func graph(from beads: [Bead], presentation: HierarchyPresentation) -> HierarchyGraph {
         let orderedBeads = beads.filter { !$0.isArchived }
+        let metrics = HierarchyGraphMetrics.metrics(for: presentation)
         let beadsByID = Dictionary(
             orderedBeads.map { ($0.relationshipID, $0) },
             uniquingKeysWith: { existing, _ in existing }
         )
         let visibleIDs = Set(beadsByID.keys)
         let childIDsByParent = childMap(for: orderedBeads, visibleIDs: visibleIDs)
-        var rootIDs: [String] = []
-        var parentedIDs = Set<String>()
+        let dependencyEdges = dependencyEdges(for: orderedBeads, visibleIDs: visibleIDs, beadsByID: beadsByID)
+        let depthByID = depths(for: orderedBeads, childIDsByParent: childIDsByParent)
+        let maxDepth = depthByID.values.max() ?? 0
+        let IDsByDepth = Dictionary(grouping: orderedBeads.map(\.relationshipID)) { depthByID[$0] ?? 0 }
+        var nodes: [HierarchyGraphNode] = []
 
-        for bead in orderedBeads {
+        for depth in 0...maxDepth {
+            let IDs = IDsByDepth[depth] ?? []
+            for (row, relationshipID) in IDs.enumerated() {
+                guard let bead = beadsByID[relationshipID] else { continue }
+                let frame = CGRect(
+                    x: metrics.inset + CGFloat(depth) * (metrics.nodeWidth + metrics.columnGap),
+                    y: metrics.inset + CGFloat(row) * (metrics.nodeHeight + metrics.rowGap),
+                    width: metrics.nodeWidth,
+                    height: metrics.nodeHeight
+                )
+                nodes.append(
+                    HierarchyGraphNode(
+                        bead: bead,
+                        frame: frame,
+                        childCount: childIDsByParent[relationshipID]?.count ?? 0,
+                        dependencyCount: bead.dependencyBeadsIDs.filter { visibleIDs.contains($0) }.count,
+                        dependentCount: bead.dependentBeadsIDs.filter { visibleIDs.contains($0) }.count
+                    )
+                )
+            }
+        }
+
+        let parentEdges = childIDsByParent.flatMap { parentID, childIDs in
+            childIDs.map {
+                HierarchyGraphEdge(fromID: parentID, toID: $0, kind: .parent, isBlocked: beadsByID[$0]?.isBlocked ?? false)
+            }
+        }
+        let edges = stableUniqueEdges(parentEdges + dependencyEdges)
+        let maxX = nodes.map(\.frame.maxX).max() ?? 0
+        let maxY = nodes.map(\.frame.maxY).max() ?? 0
+
+        return HierarchyGraph(
+            nodes: nodes,
+            edges: edges,
+            metrics: metrics,
+            canvasSize: CGSize(width: maxX + metrics.inset, height: maxY + metrics.inset)
+        )
+    }
+
+    private static func depths(for beads: [Bead], childIDsByParent: [String: [String]]) -> [String: Int] {
+        let orderedIDs = beads.map(\.relationshipID)
+        let visibleIDs = Set(orderedIDs)
+        var parentIDsByChild: [String: [String]] = [:]
+
+        for bead in beads {
             let relationshipID = bead.relationshipID
             if let parentID = bead.parentBeadsID, visibleIDs.contains(parentID) {
-                parentedIDs.insert(relationshipID)
-            } else {
-                rootIDs.append(relationshipID)
+                parentIDsByChild[relationshipID, default: []].append(parentID)
             }
         }
 
-        for childIDs in childIDsByParent.values {
-            parentedIDs.formUnion(childIDs)
-        }
-        rootIDs.removeAll { parentedIDs.contains($0) }
-
-        var result: [HierarchyRowNode] = []
-        var visitedIDs = Set<String>()
-
-        func append(_ relationshipID: String, depth: Int) {
-            guard !visitedIDs.contains(relationshipID), let bead = beadsByID[relationshipID] else { return }
-            visitedIDs.insert(relationshipID)
-
-            let childIDs = childIDsByParent[relationshipID] ?? []
-            result.append(
-                HierarchyRowNode(
-                    bead: bead,
-                    depth: depth,
-                    hasChildren: !childIDs.isEmpty,
-                    childCount: childIDs.count
-                )
-            )
-
-            guard expandedIDs.contains(relationshipID) else { return }
+        for (parentID, childIDs) in childIDsByParent {
             for childID in childIDs {
-                append(childID, depth: depth + 1)
+                parentIDsByChild[childID, default: []].append(parentID)
             }
         }
 
-        for rootID in rootIDs {
-            append(rootID, depth: 0)
+        var memo: [String: Int] = [:]
+        var visiting = Set<String>()
+
+        func depth(for relationshipID: String) -> Int {
+            if let depth = memo[relationshipID] {
+                return depth
+            }
+            guard !visiting.contains(relationshipID) else {
+                return 0
+            }
+            visiting.insert(relationshipID)
+            let parentDepth = (parentIDsByChild[relationshipID] ?? [])
+                .filter { visibleIDs.contains($0) }
+                .map { depth(for: $0) + 1 }
+                .max() ?? 0
+            visiting.remove(relationshipID)
+            memo[relationshipID] = parentDepth
+            return parentDepth
         }
 
-        for bead in orderedBeads where !visitedIDs.contains(bead.relationshipID) {
-            append(bead.relationshipID, depth: 0)
+        for relationshipID in orderedIDs {
+            memo[relationshipID] = depth(for: relationshipID)
+        }
+
+        return memo
+    }
+
+    private static func dependencyEdges(for beads: [Bead], visibleIDs: Set<String>, beadsByID: [String: Bead]) -> [HierarchyGraphEdge] {
+        var edges: [HierarchyGraphEdge] = []
+
+        for bead in beads {
+            let beadID = bead.relationshipID
+            for dependencyID in bead.dependencyBeadsIDs where visibleIDs.contains(dependencyID) {
+                edges.append(
+                    HierarchyGraphEdge(fromID: dependencyID, toID: beadID, kind: .dependency, isBlocked: bead.isBlocked)
+                )
+            }
+
+            for dependentID in bead.dependentBeadsIDs where visibleIDs.contains(dependentID) {
+                edges.append(
+                    HierarchyGraphEdge(fromID: beadID, toID: dependentID, kind: .dependency, isBlocked: beadsByID[dependentID]?.isBlocked ?? false)
+                )
+            }
+        }
+
+        return edges
+    }
+
+    private static func stableUniqueEdges(_ edges: [HierarchyGraphEdge]) -> [HierarchyGraphEdge] {
+        var seenIDs = Set<String>()
+        var result: [HierarchyGraphEdge] = []
+
+        for edge in edges where !seenIDs.contains(edge.id) {
+            seenIDs.insert(edge.id)
+            result.append(edge)
         }
 
         return result
