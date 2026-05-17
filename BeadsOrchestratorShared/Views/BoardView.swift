@@ -1290,7 +1290,6 @@ private enum HierarchyGraphBuilder {
         let childIDsByParent = childMap(for: orderedBeads, visibleIDs: visibleIDs)
         let dependencyEdges = dependencyEdges(for: orderedBeads, visibleIDs: visibleIDs, beadsByID: beadsByID)
         let depthByID = depths(for: orderedBeads, childIDsByParent: childIDsByParent)
-        let maxDepth = depthByID.values.max() ?? 0
         let framesByID = layoutFrames(
             for: orderedBeads,
             depthByID: depthByID,
