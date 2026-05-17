@@ -256,6 +256,7 @@ final class BoardStore: ObservableObject {
         let bead = draft.makeBead()
         boards[boardIndex].columns[columnIndex].beads.insert(bead, at: 0)
         reconcileParentLink(for: bead, previousParentID: nil)
+        reconcileDependencyLinks(for: bead, previousDependencyIDs: [])
         boards[boardIndex].updatedAt = .now
         selectedBeadID = bead.id
         persist()
@@ -278,8 +279,39 @@ final class BoardStore: ObservableObject {
         bead.updatedAt = .now
         boards[indexes.board].columns[indexes.column].beads[indexes.bead] = bead
         reconcileParentLink(for: bead, previousParentID: existingBead.parentBeadsID)
+        reconcileDependencyLinks(for: bead, previousDependencyIDs: existingBead.dependencyBeadsIDs)
         boards[indexes.board].updatedAt = .now
         persist()
+    }
+
+    func setParent(of beadID: Bead.ID, to parentID: String?) {
+        guard let bead = selectedBoardBeads.first(where: { $0.id == beadID }) else { return }
+        var draft = BeadDraft(bead: bead)
+        draft.parentBeadsID = parentID?.nilIfBlank
+        updateBead(beadID, with: draft)
+    }
+
+    func addDependency(to beadID: Bead.ID, dependencyID: String) {
+        guard
+            let bead = selectedBoardBeads.first(where: { $0.id == beadID }),
+            bead.relationshipID != dependencyID,
+            self.bead(beadsID: dependencyID) != nil
+        else { return }
+
+        var draft = BeadDraft(bead: bead)
+        guard !draft.dependencyBeadsIDs.contains(dependencyID) else { return }
+        draft.dependencyBeadsIDs.append(dependencyID)
+        draft.dependencyBeadsIDs.sort()
+        draft.dependencyCount = draft.dependencyBeadsIDs.count
+        updateBead(beadID, with: draft)
+    }
+
+    func removeDependency(from beadID: Bead.ID, dependencyID: String) {
+        guard let bead = selectedBoardBeads.first(where: { $0.id == beadID }) else { return }
+        var draft = BeadDraft(bead: bead)
+        draft.dependencyBeadsIDs.removeAll { $0 == dependencyID }
+        draft.dependencyCount = draft.dependencyBeadsIDs.count
+        updateBead(beadID, with: draft)
     }
 
     @discardableResult
@@ -656,6 +688,28 @@ final class BoardStore: ObservableObject {
                     parent.childBeadsIDs.append(childID)
                     parent.childBeadsIDs.sort()
                 }
+            }
+        }
+    }
+
+    private func reconcileDependencyLinks(for bead: Bead, previousDependencyIDs: [String]) {
+        let dependentID = bead.relationshipID
+        let currentDependencyIDs = Set(bead.dependencyBeadsIDs)
+
+        for dependencyID in previousDependencyIDs where !currentDependencyIDs.contains(dependencyID) {
+            mutateBead(relationshipID: dependencyID) { dependency in
+                dependency.dependentBeadsIDs.removeAll { $0 == dependentID }
+                dependency.dependentCount = dependency.dependentBeadsIDs.count
+            }
+        }
+
+        for dependencyID in currentDependencyIDs {
+            mutateBead(relationshipID: dependencyID) { dependency in
+                if !dependency.dependentBeadsIDs.contains(dependentID) {
+                    dependency.dependentBeadsIDs.append(dependentID)
+                    dependency.dependentBeadsIDs.sort()
+                }
+                dependency.dependentCount = dependency.dependentBeadsIDs.count
             }
         }
     }

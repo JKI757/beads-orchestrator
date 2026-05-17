@@ -928,7 +928,11 @@ struct LLMServerConfiguration: Codable, Equatable {
     }
 
     var endpointURL: URL? {
-        URL(string: trimmedEndpointURLString)
+        endpointCandidates.first
+    }
+
+    var endpointCandidates: [URL] {
+        Self.endpointCandidates(from: trimmedEndpointURLString)
     }
 
     var sanitizedTimeoutSeconds: Double {
@@ -941,6 +945,40 @@ struct LLMServerConfiguration: Codable, Equatable {
 
     var sanitizedRetryLimit: Int {
         min(max(retryLimit, 0), 5)
+    }
+
+    static func endpointCandidates(from rawValue: String) -> [URL] {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let valuesWithScheme = trimmed.contains("://") ? [trimmed] : ["http://\(trimmed)", "https://\(trimmed)"]
+        var candidates: [URL] = []
+
+        for valueWithScheme in valuesWithScheme {
+            guard let components = URLComponents(string: valueWithScheme) else { continue }
+            guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return [] }
+            guard let host = components.host, !host.isEmpty else { continue }
+
+            let originalPath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let suffixes = ["", "v1", "api/v1", "api", "vx"]
+            let candidatePaths = ([originalPath] + suffixes)
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
+                .reduce(into: [String]()) { result, path in
+                    guard !result.contains(path) else { return }
+                    result.append(path)
+                }
+
+            candidates.append(contentsOf: candidatePaths.compactMap { path in
+                var candidate = components
+                candidate.path = path.isEmpty ? "" : "/\(path)"
+                return candidate.url
+            })
+        }
+
+        return candidates.reduce(into: [URL]()) { result, url in
+            guard !result.contains(url) else { return }
+            result.append(url)
+        }
     }
 }
 
@@ -979,17 +1017,38 @@ final class LLMServerConfigurationStore: ObservableObject {
     }
 
     func discoverModels(for configuration: LLMServerConfiguration) async throws -> [String] {
+        try await discoverEndpoint(for: configuration).models
+    }
+
+    func discoverEndpoint(for configuration: LLMServerConfiguration) async throws -> LLMEndpointDiscoveryResult {
         let sanitizedConfiguration = sanitized(configuration)
-        guard sanitizedConfiguration.provider.requiresEndpoint else { return [] }
-        guard let endpointURL = sanitizedConfiguration.endpointURL else {
+        guard sanitizedConfiguration.provider.requiresEndpoint else {
+            throw LLMEndpointDiscoveryError.unavailable("Choose an LLM provider before discovering models.")
+        }
+        let endpointURLs = sanitizedConfiguration.endpointCandidates
+        guard !endpointURLs.isEmpty else {
             throw LLMEndpointDiscoveryError.unavailable("Enter a valid HTTP endpoint before discovering models.")
         }
 
+        var lastError: Error?
+        for endpointURL in endpointURLs {
+            do {
+                let models = try await models(at: endpointURL, configuration: sanitizedConfiguration)
+                return LLMEndpointDiscoveryResult(endpointURLString: endpointURL.absoluteString, models: models)
+            } catch {
+                lastError = error
+            }
+        }
+
+        throw lastError ?? LLMEndpointDiscoveryError.invalidResponse
+    }
+
+    private func models(at endpointURL: URL, configuration: LLMServerConfiguration) async throws -> [String] {
         var request = URLRequest(url: endpointURL.appending(path: "models"))
         request.httpMethod = "GET"
         request.timeoutInterval = 10
-        if !sanitizedConfiguration.trimmedAPIKey.isEmpty {
-            request.setValue("Bearer \(sanitizedConfiguration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
+        if !configuration.trimmedAPIKey.isEmpty {
+            request.setValue("Bearer \(configuration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -1006,17 +1065,20 @@ final class LLMServerConfigurationStore: ObservableObject {
 
     func testEndpoint(_ configuration: LLMServerConfiguration) async -> LLMEndpointTestResult {
         do {
-            let models = try await discoverModels(for: configuration)
+            let discovery = try await discoverEndpoint(for: configuration)
+            let models = discovery.models
             if models.isEmpty {
                 return LLMEndpointTestResult(
                     isSuccessful: false,
                     message: "Endpoint responded, but returned no models.",
+                    endpointURLString: discovery.endpointURLString,
                     models: []
                 )
             }
             return LLMEndpointTestResult(
                 isSuccessful: true,
-                message: "Endpoint returned \(models.count) model\(models.count == 1 ? "" : "s").",
+                message: "Endpoint returned \(models.count) model\(models.count == 1 ? "" : "s") at \(discovery.endpointURLString).",
+                endpointURLString: discovery.endpointURLString,
                 models: models
             )
         } catch {
@@ -1024,6 +1086,7 @@ final class LLMServerConfigurationStore: ObservableObject {
             return LLMEndpointTestResult(
                 isSuccessful: false,
                 message: error.localizedDescription,
+                endpointURLString: nil,
                 models: []
             )
         }
@@ -1136,6 +1199,12 @@ final class LLMServerConfigurationStore: ObservableObject {
 struct LLMEndpointTestResult: Equatable {
     var isSuccessful: Bool
     var message: String
+    var endpointURLString: String?
+    var models: [String]
+}
+
+struct LLMEndpointDiscoveryResult: Equatable {
+    var endpointURLString: String
     var models: [String]
 }
 
