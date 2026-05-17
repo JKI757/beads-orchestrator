@@ -979,11 +979,13 @@ private struct LLMSettingsSheet: View {
 private struct AIPMDashboardSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var server: BeadsHTTPServer
+    @EnvironmentObject private var store: BoardStore
     @ObservedObject var pmState: AIPMStateStore
 
     @State private var draft = AIPMAutomationSettings()
     @State private var isRunning = false
     @State private var errorMessage: String?
+    @State private var proposalToApply: AIPMDecisionProposal?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1035,9 +1037,19 @@ private struct AIPMDashboardSheet: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(pmState.state.pendingProposals) { proposal in
-                            AIPMProposalRow(proposal: proposal) { status in
-                                pmState.updateProposal(proposal.id, status: status)
-                            }
+                            AIPMProposalRow(
+                                proposal: proposal,
+                                applyProposal: {
+                                    if proposal.changes.isEmpty {
+                                        pmState.updateProposal(proposal.id, status: .accepted)
+                                    } else {
+                                        proposalToApply = proposal
+                                    }
+                                },
+                                updateStatus: { status in
+                                    pmState.updateProposal(proposal.id, status: status)
+                                }
+                            )
                         }
                     }
                 }
@@ -1088,6 +1100,12 @@ private struct AIPMDashboardSheet: View {
         .onAppear {
             draft = pmState.state.settings
         }
+        .sheet(item: $proposalToApply) { proposal in
+            AIPMProposalApplySheet(proposal: proposal) { status in
+                pmState.updateProposal(proposal.id, status: status)
+            }
+            .environmentObject(store)
+        }
     }
 
     private var lastRunText: String {
@@ -1117,6 +1135,7 @@ private struct AIPMDashboardSheet: View {
 
 private struct AIPMProposalRow: View {
     let proposal: AIPMDecisionProposal
+    var applyProposal: () -> Void
     var updateStatus: (AIPMProposalStatus) -> Void
 
     var body: some View {
@@ -1145,8 +1164,8 @@ private struct AIPMProposalRow: View {
             }
 
             HStack {
-                Button("Mark Accepted") {
-                    updateStatus(.accepted)
+                Button(proposal.changes.isEmpty ? "Mark Accepted" : "Review & Apply") {
+                    applyProposal()
                 }
                 Button("Dismiss") {
                     updateStatus(.dismissed)
@@ -1164,6 +1183,162 @@ private struct AIPMProposalRow: View {
         case .medium:
             .orange
         case .high:
+            .red
+        }
+    }
+}
+
+private struct AIPMProposalApplySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: BoardStore
+
+    let proposal: AIPMDecisionProposal
+    var updateStatus: (AIPMProposalStatus) -> Void
+
+    @State private var selectedChangeIndexes: Set<Int> = []
+    @State private var results: [BeadChangeApplicationResult] = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section("Proposal") {
+                    Text(proposal.title)
+                        .font(.headline)
+                    Text(proposal.summary)
+                        .foregroundStyle(.secondary)
+                    Text(proposal.rationale)
+                }
+
+                Section("Changes") {
+                    ForEach(Array(proposal.changes.enumerated()), id: \.offset) { index, change in
+                        Toggle(isOn: Binding(
+                            get: { selectedChangeIndexes.contains(index) },
+                            set: { isSelected in
+                                if isSelected {
+                                    selectedChangeIndexes.insert(index)
+                                } else {
+                                    selectedChangeIndexes.remove(index)
+                                }
+                            }
+                        )) {
+                            AIPMChangeSummary(change: change)
+                        }
+                    }
+                }
+
+                if !results.isEmpty {
+                    Section("Results") {
+                        ForEach(results) { result in
+                            Label(result.message, systemImage: result.status.systemImage)
+                                .foregroundStyle(result.status.color)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack {
+                Button(results.isEmpty ? "Cancel" : "Done") {
+                    dismiss()
+                }
+
+                Spacer()
+
+                Button("Apply Selected") {
+                    applySelectedChanges()
+                }
+                .disabled(selectedChangeIndexes.isEmpty)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+        }
+        .navigationTitle("Apply Proposal")
+        .frame(width: 560)
+        .frame(minHeight: 520)
+        .onAppear {
+            selectedChangeIndexes = Set(proposal.changes.indices)
+        }
+    }
+
+    private func applySelectedChanges() {
+        results = selectedChangeIndexes
+            .sorted()
+            .map { store.apply(proposal.changes[$0]) }
+
+        if results.allSatisfy({ $0.status != .failed }) {
+            updateStatus(.accepted)
+        }
+    }
+}
+
+private struct AIPMChangeSummary: View {
+    let change: BeadPlanReviewChange
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(change.kind.displayName, systemImage: icon)
+                .font(.caption.weight(.semibold))
+
+            Text(primaryText)
+                .font(.callout.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(change.rationale)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var primaryText: String {
+        switch change.kind {
+        case .updateField:
+            "\(change.field?.displayName ?? "Field"): \(change.value ?? "")"
+        case .createChildBead:
+            change.title ?? "Create child bead"
+        case .addDependency:
+            "Depend on \(change.value ?? "selected bead")"
+        case .setParent:
+            "Set parent to \(change.value ?? "selected bead")"
+        }
+    }
+
+    private var icon: String {
+        switch change.kind {
+        case .updateField:
+            "square.and.pencil"
+        case .createChildBead:
+            "plus.square.on.square"
+        case .addDependency:
+            "link"
+        case .setParent:
+            "arrowshape.turn.up.left"
+        }
+    }
+}
+
+private extension BeadChangeApplicationStatus {
+    var systemImage: String {
+        switch self {
+        case .applied:
+            "checkmark.circle"
+        case .skipped:
+            "minus.circle"
+        case .failed:
+            "exclamationmark.triangle"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .applied:
+            .green
+        case .skipped:
+            .secondary
+        case .failed:
             .red
         }
     }

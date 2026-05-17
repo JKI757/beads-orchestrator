@@ -280,6 +280,81 @@ final class BoardStore: ObservableObject {
         persist()
     }
 
+    @discardableResult
+    func apply(_ change: BeadPlanReviewChange, fallbackBead: Bead? = nil) -> BeadChangeApplicationResult {
+        switch change.kind {
+        case .updateField:
+            guard let field = change.field else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Missing field.")
+            }
+            guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Target bead was not found.")
+            }
+            guard let value = change.value else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Missing field value.")
+            }
+
+            var draft = BeadDraft(bead: target)
+            apply(field: field, value: value, to: &draft)
+            updateBead(target.id, with: draft)
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated \(target.title).")
+
+        case .createChildBead:
+            guard let parent = targetBead(for: change, fallbackBead: fallbackBead) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Parent bead was not found.")
+            }
+
+            var draft = BeadDraft()
+            draft.title = change.title?.nilIfBlank ?? "Untitled child bead"
+            draft.summary = change.summary ?? ""
+            draft.notes = change.notes ?? ""
+            draft.labelsText = change.labels?.joined(separator: ", ") ?? ""
+            draft.priority = change.priority ?? .normal
+            draft.issueType = change.issueType?.nilIfBlank
+            guard let child = createChildBead(parent: parent, draft: draft) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Could not create child bead.")
+            }
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Created \(child.title).")
+
+        case .addDependency:
+            guard let dependencyID = change.value?.nilIfBlank else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Missing dependency ID.")
+            }
+            guard bead(beadsID: dependencyID) != nil else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Dependency \(dependencyID) was not found.")
+            }
+            guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Target bead was not found.")
+            }
+
+            var draft = BeadDraft(bead: target)
+            guard !draft.dependencyBeadsIDs.contains(dependencyID) else {
+                return BeadChangeApplicationResult(change: change, status: .skipped, message: "\(target.title) already depends on \(dependencyID).")
+            }
+            draft.dependencyBeadsIDs.append(dependencyID)
+            draft.dependencyBeadsIDs.sort()
+            draft.dependencyCount = draft.dependencyBeadsIDs.count
+            updateBead(target.id, with: draft)
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Added dependency to \(target.title).")
+
+        case .setParent:
+            guard let parentID = change.value?.nilIfBlank else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Missing parent ID.")
+            }
+            guard bead(beadsID: parentID) != nil else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Parent \(parentID) was not found.")
+            }
+            guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Target bead was not found.")
+            }
+
+            var draft = BeadDraft(bead: target)
+            draft.parentBeadsID = parentID
+            updateBead(target.id, with: draft)
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Set parent for \(target.title).")
+        }
+    }
+
     func archiveBead(_ beadID: Bead.ID) {
         guard let indexes = indexes(forBeadID: beadID) else { return }
         boards[indexes.board].columns[indexes.column].beads[indexes.bead].archivedAt = .now
@@ -505,6 +580,43 @@ final class BoardStore: ObservableObject {
         }
     }
 
+    private func targetBead(for change: BeadPlanReviewChange, fallbackBead: Bead?) -> Bead? {
+        if let targetBeadsID = change.targetBeadsID?.nilIfBlank {
+            return bead(beadsID: targetBeadsID)
+        }
+        if let fallbackBead {
+            return bead(beadsID: fallbackBead.relationshipID) ?? fallbackBead
+        }
+        return nil
+    }
+
+    private func apply(field: BeadSuggestionField, value: String, to draft: inout BeadDraft) {
+        switch field {
+        case .title:
+            draft.title = value
+        case .summary:
+            draft.summary = value
+        case .notes:
+            draft.notes = value
+        case .labels:
+            draft.labelsText = value
+        case .priority:
+            if let priority = BeadPriority(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+                draft.priority = priority
+            }
+        case .issueType:
+            draft.issueType = value.nilIfBlank
+        case .parentBeadsID:
+            draft.parentBeadsID = value.nilIfBlank
+        case .dependencyBeadsIDs:
+            draft.dependencyBeadsIDs = value
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            draft.dependencyCount = draft.dependencyBeadsIDs.count
+        }
+    }
+
     private static func loadBoards(from url: URL) -> [Board]? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder.beadsDecoder.decode([Board].self, from: data)
@@ -683,6 +795,19 @@ final class BoardStore: ObservableObject {
             .deletingLastPathComponent()
             .appendingPathComponent("remote-server.json")
     }
+}
+
+struct BeadChangeApplicationResult: Identifiable, Equatable {
+    let id = UUID()
+    var change: BeadPlanReviewChange
+    var status: BeadChangeApplicationStatus
+    var message: String
+}
+
+enum BeadChangeApplicationStatus: Equatable {
+    case applied
+    case skipped
+    case failed
 }
 
 struct BeadDraft: Codable, Equatable {
