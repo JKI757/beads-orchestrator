@@ -971,6 +971,9 @@ private struct LLMSettingsSheet: View {
                     if draft.provider.requiresEndpoint {
                         TextField("Endpoint URL", text: $draft.endpointURLString)
                             .textFieldStyle(.roundedBorder)
+                        Text("You can enter just a host or IP address. The app will try common OpenAI-compatible paths such as /v1 and /api/v1.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
                         if discoveredModels.isEmpty {
                             TextField("Model", text: $draft.modelName)
@@ -1069,14 +1072,14 @@ private struct LLMSettingsSheet: View {
                 }
 
                 Button("Apply") {
-                    configurationStore.save(draft)
-                    endpointMessage = "Settings applied."
+                    Task { await applyDraft(shouldClose: false) }
                 }
+                .disabled(isDiscoveringModels || isTestingEndpoint)
 
                 Button("Save & Close") {
-                    configurationStore.save(draft)
-                    dismiss()
+                    Task { await applyDraft(shouldClose: true) }
                 }
+                .disabled(isDiscoveringModels || isTestingEndpoint)
                 .keyboardShortcut(.defaultAction)
             }
             .padding()
@@ -1103,14 +1106,15 @@ private struct LLMSettingsSheet: View {
         defer { isDiscoveringModels = false }
 
         do {
-            let models = try await configurationStore.discoverModels(for: draft)
-            discoveredModels = models
-            if draft.trimmedModelName.isEmpty, let firstModel = models.first {
+            let discovery = try await configurationStore.discoverEndpoint(for: draft)
+            draft.endpointURLString = discovery.endpointURLString
+            discoveredModels = discovery.models
+            if draft.trimmedModelName.isEmpty, let firstModel = discovery.models.first {
                 draft.modelName = firstModel
             }
-            endpointMessage = models.isEmpty
+            endpointMessage = discovery.models.isEmpty
                 ? "Endpoint responded, but returned no models."
-                : "Endpoint returned \(models.count) model\(models.count == 1 ? "" : "s")."
+                : "Endpoint returned \(discovery.models.count) model\(discovery.models.count == 1 ? "" : "s") at \(discovery.endpointURLString)."
         } catch {
             endpointMessage = error.localizedDescription
         }
@@ -1121,6 +1125,9 @@ private struct LLMSettingsSheet: View {
         defer { isTestingEndpoint = false }
 
         let result = await configurationStore.testEndpoint(draft)
+        if let endpointURLString = result.endpointURLString {
+            draft.endpointURLString = endpointURLString
+        }
         if !result.models.isEmpty {
             discoveredModels = result.models
             if draft.trimmedModelName.isEmpty, let firstModel = result.models.first {
@@ -1130,9 +1137,41 @@ private struct LLMSettingsSheet: View {
         endpointMessage = result.message
     }
 
+    private func applyDraft(shouldClose: Bool) async {
+        guard draft.provider.requiresEndpoint else {
+            configurationStore.save(draft)
+            if shouldClose {
+                dismiss()
+            } else {
+                endpointMessage = "Settings applied."
+            }
+            return
+        }
+
+        isTestingEndpoint = true
+        defer { isTestingEndpoint = false }
+
+        do {
+            let discovery = try await configurationStore.discoverEndpoint(for: draft)
+            draft.endpointURLString = discovery.endpointURLString
+            discoveredModels = discovery.models
+            if draft.trimmedModelName.isEmpty, let firstModel = discovery.models.first {
+                draft.modelName = firstModel
+            }
+            configurationStore.save(draft)
+            if shouldClose {
+                dismiss()
+            } else {
+                endpointMessage = "Settings applied with endpoint \(discovery.endpointURLString)."
+            }
+        } catch {
+            endpointMessage = error.localizedDescription
+        }
+    }
+
     private var endpointMessageColor: Color {
         guard let endpointMessage else { return .secondary }
-        if endpointMessage.hasPrefix("Endpoint returned") || endpointMessage == "Settings applied." {
+        if endpointMessage.hasPrefix("Endpoint returned") || endpointMessage.hasPrefix("Settings applied") {
             return .green
         }
         return .secondary
