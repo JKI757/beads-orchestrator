@@ -513,7 +513,7 @@ final class BeadsHTTPServer: ObservableObject {
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if configuration.provider.requiresAPIKey {
+        if !configuration.trimmedAPIKey.isEmpty {
             request.setValue("Bearer \(configuration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
         }
 

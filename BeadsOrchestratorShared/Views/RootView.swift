@@ -934,6 +934,27 @@ private struct LLMSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var configurationStore: LLMServerConfigurationStore
     @State private var draft = LLMServerConfiguration()
+    @State private var availableModels: [String] = []
+    @State private var isFetchingModels = false
+    @State private var isTestingEndpoint = false
+    @State private var modelLookupMessage: String?
+    @State private var endpointTestMessage: String?
+    @State private var modelLookupTask: Task<Void, Never>?
+
+    private var modelOptions: [String] {
+        let currentModel = draft.trimmedModelName
+        guard !currentModel.isEmpty, !availableModels.contains(currentModel) else {
+            return availableModels
+        }
+        return [currentModel] + availableModels
+    }
+
+    private var canApply: Bool {
+        if draft.provider == .disabled {
+            return true
+        }
+        return draft.endpointURL != nil && !draft.trimmedModelName.isEmpty
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -948,13 +969,48 @@ private struct LLMSettingsSheet: View {
                     if draft.provider.requiresEndpoint {
                         TextField("Endpoint URL", text: $draft.endpointURLString)
                             .textFieldStyle(.roundedBorder)
-                        TextField("Model", text: $draft.modelName)
-                            .textFieldStyle(.roundedBorder)
+                            .onSubmit {
+                                refreshModels()
+                            }
+
+                        Picker("Model", selection: $draft.modelName) {
+                            if modelOptions.isEmpty {
+                                Text(isFetchingModels ? "Checking models..." : "No models loaded").tag("")
+                            }
+
+                            ForEach(modelOptions, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .disabled(modelOptions.isEmpty)
+
+                        HStack {
+                            Button {
+                                refreshModels()
+                            } label: {
+                                Label("Refresh Models", systemImage: "arrow.clockwise")
+                            }
+                            .disabled(isFetchingModels || draft.trimmedEndpointURLString.isEmpty)
+
+                            if isFetchingModels {
+                                ProgressView()
+                                    .scaleEffect(0.75)
+                            }
+                        }
+
+                        if let modelLookupMessage {
+                            Text(modelLookupMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
-                    if draft.provider.requiresAPIKey {
+                    if draft.provider.requiresEndpoint {
                         SecureField("API key", text: $draft.apiKey)
                             .textFieldStyle(.roundedBorder)
+                        Text("Leave the API key empty for local or unauthenticated OpenAI-compatible endpoints.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -967,6 +1023,11 @@ private struct LLMSettingsSheet: View {
                     }
                     Text(status.message)
                         .foregroundStyle(.secondary)
+
+                    if let endpointTestMessage {
+                        Text(endpointTestMessage)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -982,12 +1043,23 @@ private struct LLMSettingsSheet: View {
 
                 Spacer()
 
+                Button {
+                    testEndpoint()
+                } label: {
+                    Label("Test Endpoint", systemImage: "checkmark.circle")
+                }
+                .disabled(isTestingEndpoint || !draft.provider.requiresEndpoint || draft.trimmedEndpointURLString.isEmpty)
+
+                Button("Apply") {
+                    applyDraft()
+                }
+                .disabled(!canApply)
+
                 Button("Cancel") {
                     dismiss()
                 }
 
-                Button("Save") {
-                    configurationStore.save(draft)
+                Button("Done") {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -996,9 +1068,112 @@ private struct LLMSettingsSheet: View {
         }
         .navigationTitle("LLM Settings")
         .frame(width: 520)
-        .frame(minHeight: 360)
+        .frame(minHeight: 430)
         .onAppear {
             draft = configurationStore.configuration
+            scheduleModelRefresh()
+        }
+        .onChange(of: draft.provider) {
+            endpointTestMessage = nil
+            scheduleModelRefresh()
+        }
+        .onChange(of: draft.endpointURLString) {
+            endpointTestMessage = nil
+            scheduleModelRefresh()
+        }
+        .onChange(of: draft.apiKey) {
+            endpointTestMessage = nil
+            scheduleModelRefresh()
+        }
+        .onDisappear {
+            modelLookupTask?.cancel()
+        }
+    }
+
+    private func applyDraft() {
+        configurationStore.save(draft)
+        draft = configurationStore.configuration
+        endpointTestMessage = "Settings applied."
+    }
+
+    private func testEndpoint() {
+        modelLookupTask?.cancel()
+        isTestingEndpoint = true
+        endpointTestMessage = "Testing endpoint..."
+        Task {
+            let message = await configurationStore.testEndpoint(draft)
+            await MainActor.run {
+                endpointTestMessage = message
+                isTestingEndpoint = false
+            }
+        }
+    }
+
+    private func scheduleModelRefresh() {
+        modelLookupTask?.cancel()
+        availableModels = []
+
+        guard draft.provider.requiresEndpoint else {
+            modelLookupMessage = nil
+            draft.modelName = ""
+            return
+        }
+
+        guard !draft.trimmedEndpointURLString.isEmpty else {
+            modelLookupMessage = "Enter an endpoint URL to load models."
+            return
+        }
+
+        guard draft.endpointURL != nil else {
+            modelLookupMessage = "Enter a valid HTTP endpoint to load models."
+            return
+        }
+
+        isFetchingModels = true
+        modelLookupMessage = "Checking models..."
+        let configuration = draft
+        modelLookupTask = Task {
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            await loadModels(for: configuration)
+        }
+    }
+
+    private func refreshModels() {
+        modelLookupTask?.cancel()
+        guard draft.provider.requiresEndpoint, !draft.trimmedEndpointURLString.isEmpty else { return }
+        isFetchingModels = true
+        modelLookupMessage = "Checking models..."
+        let configuration = draft
+        modelLookupTask = Task {
+            await loadModels(for: configuration)
+        }
+    }
+
+    private func loadModels(for configuration: LLMServerConfiguration) async {
+        do {
+            let models = try await configurationStore.availableModels(for: configuration)
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                availableModels = models
+                isFetchingModels = false
+                if models.isEmpty {
+                    modelLookupMessage = "Endpoint responded without any models."
+                    draft.modelName = ""
+                } else {
+                    modelLookupMessage = "Loaded \(models.count) model\(models.count == 1 ? "" : "s")."
+                    if draft.trimmedModelName.isEmpty || !models.contains(draft.trimmedModelName) {
+                        draft.modelName = models[0]
+                    }
+                }
+            }
+        } catch {
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                availableModels = []
+                isFetchingModels = false
+                modelLookupMessage = error.localizedDescription
+            }
         }
     }
 }
