@@ -1105,6 +1105,17 @@ private struct AIPMDashboardSheet: View {
                         }
                     }
                 }
+
+                Section("Audit History") {
+                    if pmState.state.auditEvents.isEmpty {
+                        Text("No audit events yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(pmState.state.auditEvents.prefix(8)) { event in
+                            AIPMAuditEventRow(event: event)
+                        }
+                    }
+                }
             }
             .formStyle(.grouped)
 
@@ -1237,6 +1248,7 @@ private struct AIPMProposalRow: View {
 
 private struct AIPMProposalApplySheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var server: BeadsHTTPServer
     @EnvironmentObject private var store: BoardStore
 
     let proposal: AIPMDecisionProposal
@@ -1313,6 +1325,14 @@ private struct AIPMProposalApplySheet: View {
         results = selectedChangeIndexes
             .sorted()
             .map { store.apply(proposal.changes[$0]) }
+        for result in results {
+            server.aiPMState.recordActionApplication(
+                proposal: proposal,
+                change: result.change,
+                resultStatus: result.status.auditValue,
+                resultMessage: result.message
+            )
+        }
 
         if results.allSatisfy({ $0.status != .failed }) {
             updateStatus(.accepted)
@@ -1390,6 +1410,17 @@ private struct AIPMChangeSummary: View {
 }
 
 private extension BeadChangeApplicationStatus {
+    var auditValue: String {
+        switch self {
+        case .applied:
+            "applied"
+        case .skipped:
+            "skipped"
+        case .failed:
+            "failed"
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .applied:
@@ -1695,6 +1726,17 @@ private struct RemoteAIPMDashboardSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                Section("Audit History") {
+                    if let state = store.remoteAIPMState, !state.auditEvents.isEmpty {
+                        ForEach(state.auditEvents.prefix(8)) { event in
+                            AIPMAuditEventRow(event: event)
+                        }
+                    } else {
+                        Text("No audit events yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle("AI PM")
             .toolbar {
@@ -1859,6 +1901,51 @@ private struct AIPMProjectIntelligenceView: View {
             .orange
         case .critical:
             .red
+        }
+    }
+}
+
+private struct AIPMAuditEventRow: View {
+    let event: AIPMAuditEvent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(event.kind.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(kindColor)
+                Spacer()
+                Text(event.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(event.summary)
+                .font(.subheadline.weight(.semibold))
+            if let message = event.resultMessage, !message.isEmpty {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let change = event.change {
+                Text(change.kind.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var kindColor: Color {
+        switch event.kind {
+        case .runFailed:
+            .red
+        case .proposalActionApplied:
+            .blue
+        case .proposalStatusChanged:
+            .orange
+        case .runCompleted:
+            .secondary
         }
     }
 }

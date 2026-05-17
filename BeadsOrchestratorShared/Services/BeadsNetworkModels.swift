@@ -308,6 +308,7 @@ struct AIPMState: Codable, Equatable {
     var latestIntelligence: AIPMProjectIntelligenceSummary?
     var proposals: [AIPMDecisionProposal]
     var reports: [AIPMReportSnapshot]
+    var auditEvents: [AIPMAuditEvent]
     var updatedAt: Date
 
     init(
@@ -319,6 +320,7 @@ struct AIPMState: Codable, Equatable {
         latestIntelligence: AIPMProjectIntelligenceSummary? = nil,
         proposals: [AIPMDecisionProposal] = [],
         reports: [AIPMReportSnapshot] = [],
+        auditEvents: [AIPMAuditEvent] = [],
         updatedAt: Date = .now
     ) {
         self.settings = settings
@@ -329,11 +331,39 @@ struct AIPMState: Codable, Equatable {
         self.latestIntelligence = latestIntelligence
         self.proposals = proposals
         self.reports = reports
+        self.auditEvents = auditEvents
         self.updatedAt = updatedAt
     }
 
     var pendingProposals: [AIPMDecisionProposal] {
         proposals.filter { $0.status == .pending }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case settings
+        case lastRunAt
+        case lastRunSummary
+        case lastRunError
+        case nextRunAt
+        case latestIntelligence
+        case proposals
+        case reports
+        case auditEvents
+        case updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        settings = try container.decodeIfPresent(AIPMAutomationSettings.self, forKey: .settings) ?? AIPMAutomationSettings()
+        lastRunAt = try container.decodeIfPresent(Date.self, forKey: .lastRunAt)
+        lastRunSummary = try container.decodeIfPresent(String.self, forKey: .lastRunSummary)
+        lastRunError = try container.decodeIfPresent(String.self, forKey: .lastRunError)
+        nextRunAt = try container.decodeIfPresent(Date.self, forKey: .nextRunAt)
+        latestIntelligence = try container.decodeIfPresent(AIPMProjectIntelligenceSummary.self, forKey: .latestIntelligence)
+        proposals = try container.decodeIfPresent([AIPMDecisionProposal].self, forKey: .proposals) ?? []
+        reports = try container.decodeIfPresent([AIPMReportSnapshot].self, forKey: .reports) ?? []
+        auditEvents = try container.decodeIfPresent([AIPMAuditEvent].self, forKey: .auditEvents) ?? []
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
     }
 }
 
@@ -427,6 +457,67 @@ struct AIPMReportSnapshot: Codable, Equatable, Identifiable {
         self.summary = summary
         self.sections = sections
         self.generatedAt = generatedAt
+    }
+}
+
+struct AIPMAuditEvent: Codable, Equatable, Identifiable {
+    var id: UUID
+    var kind: AIPMAuditEventKind
+    var actor: String
+    var summary: String
+    var proposalID: AIPMDecisionProposal.ID?
+    var proposalTitle: String?
+    var change: BeadPlanReviewChange?
+    var resultStatus: String?
+    var resultMessage: String?
+    var createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        kind: AIPMAuditEventKind,
+        actor: String = "AI PM",
+        summary: String,
+        proposalID: AIPMDecisionProposal.ID? = nil,
+        proposalTitle: String? = nil,
+        change: BeadPlanReviewChange? = nil,
+        resultStatus: String? = nil,
+        resultMessage: String? = nil,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.kind = kind
+        self.actor = actor
+        self.summary = summary
+        self.proposalID = proposalID
+        self.proposalTitle = proposalTitle
+        self.change = change
+        self.resultStatus = resultStatus
+        self.resultMessage = resultMessage
+        self.createdAt = createdAt
+    }
+}
+
+enum AIPMAuditEventKind: String, Codable, CaseIterable, Identifiable {
+    case runCompleted
+    case runFailed
+    case proposalStatusChanged
+    case proposalActionApplied
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .runCompleted:
+            "Run Completed"
+        case .runFailed:
+            "Run Failed"
+        case .proposalStatusChanged:
+            "Decision Updated"
+        case .proposalActionApplied:
+            "Action Applied"
+        }
     }
 }
 
@@ -845,6 +936,14 @@ final class AIPMStateStore: ObservableObject {
         if let report {
             nextState.reports = Array(([report] + nextState.reports).prefix(20))
         }
+        nextState.auditEvents = prependingAuditEvent(
+            AIPMAuditEvent(
+                kind: .runCompleted,
+                summary: summary,
+                resultMessage: "\(proposals.count) proposal\(proposals.count == 1 ? "" : "s") generated"
+            ),
+            to: nextState.auditEvents
+        )
         nextState.nextRunAt = nextScheduledRunDate(for: nextState)
         nextState.updatedAt = .now
         state = nextState
@@ -855,6 +954,15 @@ final class AIPMStateStore: ObservableObject {
         var nextState = state
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         nextState.lastRunError = trimmedMessage.isEmpty ? nil : trimmedMessage
+        nextState.auditEvents = prependingAuditEvent(
+            AIPMAuditEvent(
+                kind: .runFailed,
+                summary: "AI PM run failed",
+                resultStatus: "failed",
+                resultMessage: trimmedMessage
+            ),
+            to: nextState.auditEvents
+        )
         nextState.nextRunAt = nextScheduledRunDate(for: nextState)
         nextState.updatedAt = .now
         state = nextState
@@ -873,6 +981,43 @@ final class AIPMStateStore: ObservableObject {
         var nextState = state
         guard let index = nextState.proposals.firstIndex(where: { $0.id == proposalID }) else { return }
         nextState.proposals[index].status = status
+        let proposal = nextState.proposals[index]
+        nextState.auditEvents = prependingAuditEvent(
+            AIPMAuditEvent(
+                kind: .proposalStatusChanged,
+                actor: "User",
+                summary: "Marked \(proposal.title) \(status.rawValue)",
+                proposalID: proposal.id,
+                proposalTitle: proposal.title,
+                resultStatus: status.rawValue
+            ),
+            to: nextState.auditEvents
+        )
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    func recordActionApplication(
+        proposal: AIPMDecisionProposal,
+        change: BeadPlanReviewChange,
+        resultStatus: String,
+        resultMessage: String
+    ) {
+        var nextState = state
+        nextState.auditEvents = prependingAuditEvent(
+            AIPMAuditEvent(
+                kind: .proposalActionApplied,
+                actor: "User",
+                summary: "\(change.kind.displayName): \(proposal.title)",
+                proposalID: proposal.id,
+                proposalTitle: proposal.title,
+                change: change,
+                resultStatus: resultStatus,
+                resultMessage: resultMessage
+            ),
+            to: nextState.auditEvents
+        )
         nextState.updatedAt = .now
         state = nextState
         persist()
@@ -888,6 +1033,10 @@ final class AIPMStateStore: ObservableObject {
         guard state.settings.isEnabled, let interval = state.settings.cadence.intervalSeconds else { return nil }
         guard let lastRunAt = state.lastRunAt else { return Date().addingTimeInterval(15) }
         return max(lastRunAt.addingTimeInterval(interval), Date().addingTimeInterval(15))
+    }
+
+    private func prependingAuditEvent(_ event: AIPMAuditEvent, to events: [AIPMAuditEvent]) -> [AIPMAuditEvent] {
+        Array(([event] + events).prefix(120))
     }
 
     private func persist() {

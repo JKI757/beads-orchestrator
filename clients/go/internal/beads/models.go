@@ -176,6 +176,7 @@ type AIPMState struct {
 	LatestIntelligence *AIPMProjectIntelligence `json:"latestIntelligence,omitempty"`
 	Proposals          []AIPMDecisionProposal   `json:"proposals"`
 	Reports            []AIPMReportSnapshot     `json:"reports"`
+	AuditEvents        []AIPMAuditEvent         `json:"auditEvents"`
 	UpdatedAt          time.Time                `json:"updatedAt"`
 }
 
@@ -197,6 +198,19 @@ type AIPMReportSnapshot struct {
 	Summary     string                    `json:"summary"`
 	Sections    []BeadStatusReportSection `json:"sections"`
 	GeneratedAt time.Time                 `json:"generatedAt"`
+}
+
+type AIPMAuditEvent struct {
+	ID            string                `json:"id"`
+	Kind          string                `json:"kind"`
+	Actor         string                `json:"actor"`
+	Summary       string                `json:"summary"`
+	ProposalID    *string               `json:"proposalID,omitempty"`
+	ProposalTitle *string               `json:"proposalTitle,omitempty"`
+	Change        *BeadPlanReviewChange `json:"change,omitempty"`
+	ResultStatus  *string               `json:"resultStatus,omitempty"`
+	ResultMessage *string               `json:"resultMessage,omitempty"`
+	CreatedAt     time.Time             `json:"createdAt"`
 }
 
 type AIPMProjectIntelligence struct {
