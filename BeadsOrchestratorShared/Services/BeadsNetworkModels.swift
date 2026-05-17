@@ -1,5 +1,8 @@
 import Foundation
 import Combine
+#if os(macOS)
+import UserNotifications
+#endif
 
 struct BeadsServerInfo: Codable, Equatable {
     var name: String
@@ -233,6 +236,9 @@ struct AIPMAutomationSettings: Codable, Equatable {
     var reviewsBacklog: Bool
     var generatesReports: Bool
     var maximumProposals: Int
+    var sendsNotifications: Bool
+    var notifiesHighRiskProposals: Bool
+    var notifiesRunFailures: Bool
 
     init(
         isEnabled: Bool = true,
@@ -240,7 +246,10 @@ struct AIPMAutomationSettings: Codable, Equatable {
         autonomyLevel: AIPMAutonomyLevel = .surfaceDecisions,
         reviewsBacklog: Bool = true,
         generatesReports: Bool = true,
-        maximumProposals: Int = 8
+        maximumProposals: Int = 8,
+        sendsNotifications: Bool = false,
+        notifiesHighRiskProposals: Bool = true,
+        notifiesRunFailures: Bool = true
     ) {
         self.isEnabled = isEnabled
         self.cadence = cadence
@@ -248,6 +257,34 @@ struct AIPMAutomationSettings: Codable, Equatable {
         self.reviewsBacklog = reviewsBacklog
         self.generatesReports = generatesReports
         self.maximumProposals = maximumProposals
+        self.sendsNotifications = sendsNotifications
+        self.notifiesHighRiskProposals = notifiesHighRiskProposals
+        self.notifiesRunFailures = notifiesRunFailures
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case cadence
+        case autonomyLevel
+        case reviewsBacklog
+        case generatesReports
+        case maximumProposals
+        case sendsNotifications
+        case notifiesHighRiskProposals
+        case notifiesRunFailures
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        cadence = try container.decodeIfPresent(AIPMCadence.self, forKey: .cadence) ?? .manual
+        autonomyLevel = try container.decodeIfPresent(AIPMAutonomyLevel.self, forKey: .autonomyLevel) ?? .surfaceDecisions
+        reviewsBacklog = try container.decodeIfPresent(Bool.self, forKey: .reviewsBacklog) ?? true
+        generatesReports = try container.decodeIfPresent(Bool.self, forKey: .generatesReports) ?? true
+        maximumProposals = try container.decodeIfPresent(Int.self, forKey: .maximumProposals) ?? 8
+        sendsNotifications = try container.decodeIfPresent(Bool.self, forKey: .sendsNotifications) ?? false
+        notifiesHighRiskProposals = try container.decodeIfPresent(Bool.self, forKey: .notifiesHighRiskProposals) ?? true
+        notifiesRunFailures = try container.decodeIfPresent(Bool.self, forKey: .notifiesRunFailures) ?? true
     }
 }
 
@@ -339,6 +376,18 @@ struct AIPMState: Codable, Equatable {
 
     var pendingProposals: [AIPMDecisionProposal] {
         proposals.filter { $0.status == .pending }
+    }
+
+    var highRiskPendingProposals: [AIPMDecisionProposal] {
+        pendingProposals.filter { $0.risk == .high }
+    }
+
+    var unreadDecisionCount: Int {
+        pendingProposals.count
+    }
+
+    var needsAttention: Bool {
+        unreadDecisionCount > 0 || lastRunError?.isEmpty == false
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1036,6 +1085,39 @@ private enum LLMEndpointDiscoveryError: LocalizedError {
         }
     }
 }
+
+private final class AIPMLocalNotifier {
+    static let shared = AIPMLocalNotifier()
+
+    private init() {}
+
+    func deliver(identifier: String, title: String, body: String) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                self.enqueue(identifier: identifier, title: title, body: body, center: center)
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    guard granted else { return }
+                    self.enqueue(identifier: identifier, title: title, body: body, center: center)
+                }
+            case .denied:
+                return
+            @unknown default:
+                return
+            }
+        }
+    }
+
+    private func enqueue(identifier: String, title: String, body: String, center: UNUserNotificationCenter) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
+    }
+}
 #endif
 
 #if os(macOS)
@@ -1087,6 +1169,7 @@ final class AIPMStateStore: ObservableObject {
         nextState.updatedAt = .now
         state = nextState
         persist()
+        notifyForRun(settings: nextState.settings, proposals: proposals)
     }
 
     func recordRunFailure(_ message: String) {
@@ -1106,6 +1189,7 @@ final class AIPMStateStore: ObservableObject {
         nextState.updatedAt = .now
         state = nextState
         persist()
+        notifyForRunFailure(settings: nextState.settings, message: trimmedMessage)
     }
 
     func refreshSchedule() {
@@ -1165,7 +1249,33 @@ final class AIPMStateStore: ObservableObject {
     private func sanitized(_ settings: AIPMAutomationSettings) -> AIPMAutomationSettings {
         var settings = settings
         settings.maximumProposals = min(max(settings.maximumProposals, 1), 20)
+        if !settings.sendsNotifications {
+            settings.notifiesHighRiskProposals = false
+            settings.notifiesRunFailures = false
+        }
         return settings
+    }
+
+    private func notifyForRun(settings: AIPMAutomationSettings, proposals: [AIPMDecisionProposal]) {
+        guard settings.sendsNotifications, settings.notifiesHighRiskProposals else { return }
+        let highRiskProposals = proposals.filter { $0.risk == .high && $0.status == .pending }
+        guard !highRiskProposals.isEmpty else { return }
+
+        let proposalCount = highRiskProposals.count
+        AIPMLocalNotifier.shared.deliver(
+            identifier: "ai-pm-high-risk-\(UUID().uuidString)",
+            title: "AI PM needs review",
+            body: "\(proposalCount) high-risk proposal\(proposalCount == 1 ? "" : "s") need a decision. Open the AI PM dashboard to review."
+        )
+    }
+
+    private func notifyForRunFailure(settings: AIPMAutomationSettings, message: String) {
+        guard settings.sendsNotifications, settings.notifiesRunFailures else { return }
+        AIPMLocalNotifier.shared.deliver(
+            identifier: "ai-pm-run-failed-\(UUID().uuidString)",
+            title: "AI PM run failed",
+            body: "Open the AI PM dashboard to review the provider error and retry. \(message)"
+        )
     }
 
     private func nextScheduledRunDate(for state: AIPMState) -> Date? {

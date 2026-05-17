@@ -828,7 +828,15 @@ private struct ConnectionSettingsSheet: View {
                         Button {
                             showingAIPMDashboard = true
                         } label: {
-                            Label("Open AI PM", systemImage: "sparkles")
+                            HStack {
+                                Label("Open AI PM", systemImage: "sparkles")
+                                Spacer()
+                                if let decisionText = remoteDecisionText {
+                                    Text(decisionText)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.red)
+                                }
+                            }
                         }
 
                         Button {
@@ -904,6 +912,17 @@ private struct ConnectionSettingsSheet: View {
                 .environmentObject(store)
         }
         #endif
+    }
+
+    private var remoteDecisionText: String? {
+        guard let state = store.remoteAIPMState, state.needsAttention else { return nil }
+        if state.unreadDecisionCount > 0 {
+            return "\(state.unreadDecisionCount) pending"
+        }
+        if state.lastRunError?.isEmpty == false {
+            return "Needs attention"
+        }
+        return nil
     }
 
     private func save() {
@@ -1162,6 +1181,17 @@ private struct AIPMDashboardSheet: View {
                     Stepper(value: $draft.maximumProposals, in: 1...20) {
                         LabeledContent("Maximum proposals", value: "\(draft.maximumProposals)")
                     }
+                }
+
+                Section("Notifications") {
+                    Toggle("Notify on this Mac", isOn: $draft.sendsNotifications)
+                    Toggle("High-risk proposals", isOn: $draft.notifiesHighRiskProposals)
+                        .disabled(!draft.sendsNotifications)
+                    Toggle("Run failures", isOn: $draft.notifiesRunFailures)
+                        .disabled(!draft.sendsNotifications)
+                    Text("Notifications point back to the AI PM dashboard so decisions stay reviewable in the canonical server state.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Status") {
@@ -1788,6 +1818,7 @@ private struct RemoteAIPMDashboardSheet: View {
                         LabeledContent("Last run", value: lastRunText(for: state))
                         LabeledContent("Next run", value: nextRunText(for: state))
                         LabeledContent("Pending decisions", value: "\(state.pendingProposals.count)")
+                        LabeledContent("High-risk decisions", value: "\(state.highRiskPendingProposals.count)")
                         LabeledContent("Cadence", value: state.settings.cadence.displayName)
                         LabeledContent("Autonomy", value: state.settings.autonomyLevel.displayName)
                         if let summary = state.lastRunSummary, !summary.isEmpty {

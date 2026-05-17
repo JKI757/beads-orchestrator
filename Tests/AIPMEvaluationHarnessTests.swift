@@ -299,6 +299,37 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertEqual(reloaded.state.auditEvents.first?.kind, .runFailed)
     }
 
+    func testAIPMSettingsDecodeLegacyNotificationDefaultsAndAttentionState() throws {
+        let json = """
+        {
+          "isEnabled": true,
+          "cadence": "daily",
+          "autonomyLevel": "surfaceDecisions",
+          "reviewsBacklog": true,
+          "generatesReports": true,
+          "maximumProposals": 8
+        }
+        """
+
+        let settings = try BeadsJSON.decoder.decode(AIPMAutomationSettings.self, from: Data(json.utf8))
+        XCTAssertFalse(settings.sendsNotifications)
+        XCTAssertTrue(settings.notifiesHighRiskProposals)
+        XCTAssertTrue(settings.notifiesRunFailures)
+
+        let state = AIPMState(proposals: [
+            AIPMDecisionProposal(
+                title: "Resolve launch risk",
+                summary: "Needs a decision.",
+                category: .decision,
+                risk: .high,
+                rationale: "The next milestone is blocked."
+            )
+        ])
+        XCTAssertEqual(state.unreadDecisionCount, 1)
+        XCTAssertEqual(state.highRiskPendingProposals.count, 1)
+        XCTAssertTrue(state.needsAttention)
+    }
+
     private func temporaryFile(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("BeadsOrchestratorTests-\(UUID().uuidString)", isDirectory: true)

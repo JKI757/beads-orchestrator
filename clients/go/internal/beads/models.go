@@ -161,12 +161,15 @@ type BeadStatusReportSection struct {
 }
 
 type AIPMAutomationSettings struct {
-	IsEnabled        bool   `json:"isEnabled"`
-	Cadence          string `json:"cadence"`
-	AutonomyLevel    string `json:"autonomyLevel"`
-	ReviewsBacklog   bool   `json:"reviewsBacklog"`
-	GeneratesReports bool   `json:"generatesReports"`
-	MaximumProposals int    `json:"maximumProposals"`
+	IsEnabled                 bool   `json:"isEnabled"`
+	Cadence                   string `json:"cadence"`
+	AutonomyLevel             string `json:"autonomyLevel"`
+	ReviewsBacklog            bool   `json:"reviewsBacklog"`
+	GeneratesReports          bool   `json:"generatesReports"`
+	MaximumProposals          int    `json:"maximumProposals"`
+	SendsNotifications        bool   `json:"sendsNotifications"`
+	NotifiesHighRiskProposals bool   `json:"notifiesHighRiskProposals"`
+	NotifiesRunFailures       bool   `json:"notifiesRunFailures"`
 }
 
 type AIPMState struct {
