@@ -23,6 +23,166 @@ enum RepositorySourceError: LocalizedError {
     }
 }
 
+enum BeadsProjectImportError: LocalizedError {
+    case noBeadsDirectory(String)
+    case unreadableIssues(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noBeadsDirectory(let path):
+            "No .beads project was found at \(path)."
+        case .unreadableIssues(let path):
+            "Could not read beads issues at \(path)."
+        }
+    }
+}
+
+struct BeadsProjectImporter {
+    static func hasBeadsProject(at url: URL) -> Bool {
+        let rootURL = normalizedProjectRoot(for: url)
+        return FileManager.default.fileExists(atPath: rootURL.appendingPathComponent(".beads", isDirectory: true).path(percentEncoded: false))
+    }
+
+    static func importBoard(from url: URL, defaultColumns: [BoardColumn]) throws -> Board {
+        let didStartAccessing = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let rootURL = normalizedProjectRoot(for: url)
+        let rootPath = rootURL.path(percentEncoded: false)
+        let beadsDirectoryURL = rootURL.appendingPathComponent(".beads", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: beadsDirectoryURL.path(percentEncoded: false)) else {
+            throw BeadsProjectImportError.noBeadsDirectory(rootPath)
+        }
+
+        var columns = defaultColumns
+        let issuesURL = beadsDirectoryURL.appendingPathComponent("issues.jsonl")
+        if FileManager.default.fileExists(atPath: issuesURL.path(percentEncoded: false)) {
+            let importedIssues = try readIssues(from: issuesURL)
+            for issue in importedIssues {
+                let columnName = columnName(for: issue.status)
+                let columnIndex = columns.firstIndex { $0.name == columnName } ?? 0
+                columns[columnIndex].beads.append(issue.makeBead())
+            }
+        }
+
+        return Board(
+            name: rootURL.lastPathComponent,
+            repositoryName: rootURL.lastPathComponent,
+            repositoryPath: rootPath,
+            columns: columns
+        )
+    }
+
+    private static func normalizedProjectRoot(for url: URL) -> URL {
+        let standardizedURL = url.standardizedFileURL
+        return standardizedURL.lastPathComponent == ".beads"
+            ? standardizedURL.deletingLastPathComponent()
+            : standardizedURL
+    }
+
+    private static func readIssues(from url: URL) throws -> [BeadsIssueRecord] {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            throw BeadsProjectImportError.unreadableIssues(url.path(percentEncoded: false))
+        }
+
+        return content
+            .split(whereSeparator: \.isNewline)
+            .compactMap { line in
+                let data = Data(line.utf8)
+                return try? JSONDecoder.beadsIssuesDecoder.decode(BeadsIssueRecord.self, from: data)
+            }
+    }
+
+    private static func columnName(for status: String?) -> String {
+        switch status?.lowercased() {
+        case "closed", "done", "resolved":
+            "Done"
+        case "in_progress", "in-progress", "started", "doing":
+            "In Progress"
+        case "blocked":
+            "Blocked"
+        case "review", "in_review", "in-review":
+            "Review"
+        case "ready":
+            "Ready"
+        default:
+            "Backlog"
+        }
+    }
+}
+
+private struct BeadsIssueRecord: Decodable {
+    var id: String?
+    var title: String?
+    var description: String?
+    var acceptanceCriteria: String?
+    var status: String?
+    var priority: Int?
+    var issueType: String?
+    var createdAt: Date?
+    var updatedAt: Date?
+    var closedAt: Date?
+    var closeReason: String?
+    var labels: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case description
+        case acceptanceCriteria = "acceptance_criteria"
+        case status
+        case priority
+        case issueType = "issue_type"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case closedAt = "closed_at"
+        case closeReason = "close_reason"
+        case labels
+    }
+
+    func makeBead() -> Bead {
+        let issueTitle = title?.nilIfBlank ?? id ?? "Untitled bead"
+        let issueLabels = Array(Set((labels ?? []) + [issueType?.nilIfBlank].compactMap(\.self))).sorted()
+        let notes = [
+            id.map { "Beads ID: \($0)" },
+            acceptanceCriteria?.nilIfBlank.map { "Acceptance Criteria:\n\($0)" },
+            closeReason?.nilIfBlank.map { "Close Reason: \($0)" }
+        ]
+            .compactMap(\.self)
+            .joined(separator: "\n\n")
+
+        return Bead(
+            title: issueTitle,
+            summary: description ?? "",
+            sourceType: .manual,
+            labels: issueLabels,
+            priority: beadPriority,
+            isBlocked: status?.localizedCaseInsensitiveContains("blocked") ?? false,
+            notes: notes,
+            createdAt: createdAt ?? updatedAt ?? .now,
+            updatedAt: updatedAt ?? createdAt ?? .now
+        )
+    }
+
+    private var beadPriority: BeadPriority {
+        guard let priority else { return .normal }
+        switch priority {
+        case ...0:
+            return .urgent
+        case 1:
+            return .high
+        case 2:
+            return .normal
+        default:
+            return .low
+        }
+    }
+}
+
 struct RepositorySnapshot: Hashable {
     var repositoryName: String
     var repositoryPath: String?
@@ -358,10 +518,21 @@ private extension String {
         let value = trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
     }
+
+    var nilIfBlank: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
 }
 
 private extension JSONDecoder {
     static var githubDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    static var beadsIssuesDecoder: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder

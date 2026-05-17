@@ -97,6 +97,18 @@ final class BoardStore: ObservableObject {
         persist()
     }
 
+    func importBeadsProject(at url: URL) {
+        importErrorMessage = nil
+        do {
+            let board = try BeadsProjectImporter.importBoard(from: url, defaultColumns: Self.defaultColumns)
+            boards.insert(board, at: 0)
+            select(board)
+            persist()
+        } catch {
+            importErrorMessage = error.localizedDescription
+        }
+    }
+
     func updateSelectedBoard(name: String, repositoryName: String, repositoryPath: String?) {
         guard let boardIndex = indexOfSelectedBoard else { return }
         boards[boardIndex].name = name

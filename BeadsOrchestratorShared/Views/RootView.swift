@@ -16,6 +16,7 @@ struct RootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
     @State private var showingNewBoard = false
+    @State private var showingImportBoard = false
     @State private var showingNewBead = false
     @State private var showingRepositoryImporter = false
     @State private var showingConnectionSettings = false
@@ -133,12 +134,16 @@ struct RootView: View {
                 .disabled(store.selectedBoard == nil)
 
                 Menu {
-                    Button("New Board") {
+                    Button("New Empty Board") {
                         showingNewBoard = true
                     }
 
+                    Button("Import Existing Beads Project") {
+                        showingImportBoard = true
+                    }
+
                     #if os(macOS)
-                    Button("Import Local Repository") {
+                    Button("Scan Local Git Repository") {
                         showingRepositoryImporter = true
                     }
                     #endif
@@ -148,7 +153,10 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showingNewBoard) {
-            BoardEditorSheet()
+            BoardEditorSheet(mode: .create)
+        }
+        .sheet(isPresented: $showingImportBoard) {
+            BoardEditorSheet(mode: .importExisting)
         }
         .sheet(isPresented: $showingNewBead) {
             BeadEditorSheet(mode: .create)
@@ -191,6 +199,7 @@ struct RootView: View {
 private struct TabletRootView: View {
     @EnvironmentObject private var store: BoardStore
     @State private var showingNewBoard = false
+    @State private var showingImportBoard = false
     @State private var showingNewBead = false
     @State private var showingConnectionSettings = false
 
@@ -199,19 +208,24 @@ private struct TabletRootView: View {
             if isLandscape(proxy.size) {
                 TabletLandscapeWorkspace(
                     showingNewBoard: $showingNewBoard,
+                    showingImportBoard: $showingImportBoard,
                     showingNewBead: $showingNewBead,
                     showingConnectionSettings: $showingConnectionSettings
                 )
             } else {
                 TabletPortraitWorkspace(
                     showingNewBoard: $showingNewBoard,
+                    showingImportBoard: $showingImportBoard,
                     showingNewBead: $showingNewBead,
                     showingConnectionSettings: $showingConnectionSettings
                 )
             }
         }
         .sheet(isPresented: $showingNewBoard) {
-            BoardEditorSheet()
+            BoardEditorSheet(mode: .create)
+        }
+        .sheet(isPresented: $showingImportBoard) {
+            BoardEditorSheet(mode: .importExisting)
         }
         .sheet(isPresented: $showingNewBead) {
             BeadEditorSheet(mode: .create)
@@ -239,6 +253,7 @@ private struct TabletRootView: View {
 private struct TabletPortraitWorkspace: View {
     @EnvironmentObject private var store: BoardStore
     @Binding var showingNewBoard: Bool
+    @Binding var showingImportBoard: Bool
     @Binding var showingNewBead: Bool
     @Binding var showingConnectionSettings: Bool
 
@@ -272,7 +287,7 @@ private struct TabletPortraitWorkspace: View {
                 }
                 .disabled(store.selectedBoard == nil)
 
-                BoardMenuButton(showingNewBoard: $showingNewBoard)
+                BoardMenuButton(showingNewBoard: $showingNewBoard, showingImportBoard: $showingImportBoard)
             }
         }
     }
@@ -281,6 +296,7 @@ private struct TabletPortraitWorkspace: View {
 private struct TabletLandscapeWorkspace: View {
     @EnvironmentObject private var store: BoardStore
     @Binding var showingNewBoard: Bool
+    @Binding var showingImportBoard: Bool
     @Binding var showingNewBead: Bool
     @Binding var showingConnectionSettings: Bool
 
@@ -315,8 +331,12 @@ private struct TabletLandscapeWorkspace: View {
 
                         Divider()
 
-                        Button("New Board") {
+                        Button("New Empty Board") {
                             showingNewBoard = true
+                        }
+
+                        Button("Import Existing Beads Project") {
+                            showingImportBoard = true
                         }
                     } label: {
                         Label("Boards", systemImage: "sidebar.left")
@@ -347,6 +367,7 @@ private struct TabletLandscapeWorkspace: View {
 private struct CompactRootView: View {
     @EnvironmentObject private var store: BoardStore
     @State private var showingNewBoard = false
+    @State private var showingImportBoard = false
     @State private var showingNewBead = false
     @State private var showingConnectionSettings = false
     @State private var selectedColumnID: BoardColumn.ID?
@@ -364,7 +385,7 @@ private struct CompactRootView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    BoardMenuButton(showingNewBoard: $showingNewBoard)
+                    BoardMenuButton(showingNewBoard: $showingNewBoard, showingImportBoard: $showingImportBoard)
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -385,7 +406,10 @@ private struct CompactRootView: View {
                 }
             }
             .sheet(isPresented: $showingNewBoard) {
-                BoardEditorSheet()
+                BoardEditorSheet(mode: .create)
+            }
+            .sheet(isPresented: $showingImportBoard) {
+                BoardEditorSheet(mode: .importExisting)
             }
             .sheet(isPresented: $showingNewBead) {
                 BeadEditorSheet(mode: .create)
@@ -548,12 +572,19 @@ private struct FilterMenuButton: View {
 
 private struct BoardMenuButton: View {
     @Binding var showingNewBoard: Bool
+    @Binding var showingImportBoard: Bool
 
     var body: some View {
-        Button {
-            showingNewBoard = true
+        Menu {
+            Button("New Empty Board") {
+                showingNewBoard = true
+            }
+
+            Button("Import Existing Beads Project") {
+                showingImportBoard = true
+            }
         } label: {
-            Label("New Board", systemImage: "rectangle.stack.badge.plus")
+            Label("Boards", systemImage: "rectangle.stack")
         }
     }
 }
@@ -847,24 +878,52 @@ private final class QRScannerViewController: UIViewController, AVCaptureMetadata
 }
 #endif
 
+private enum BoardEditorMode: Equatable {
+    case create
+    case importExisting
+
+    var title: String {
+        switch self {
+        case .create:
+            "New Empty Board"
+        case .importExisting:
+            "Import Beads Project"
+        }
+    }
+
+    var confirmationTitle: String {
+        switch self {
+        case .create:
+            "Create"
+        case .importExisting:
+            "Import"
+        }
+    }
+}
+
 private struct BoardEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: BoardStore
 
+    let mode: BoardEditorMode
+
     @State private var name = ""
     @State private var repositoryName = ""
-    @State private var repositoryPath = ""
+    @State private var selectedRepositoryURL: URL?
+    @State private var selectedFolderHasBeadsProject = false
+    @State private var showingFolderPicker = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Board") {
-                    TextField("Name", text: $name)
-                    TextField("Repository", text: $repositoryName)
-                    TextField("Repository path", text: $repositoryPath)
+                switch mode {
+                case .create:
+                    createForm
+                case .importExisting:
+                    importForm
                 }
             }
-            .navigationTitle("New Board")
+            .navigationTitle(mode.title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -872,20 +931,126 @@ private struct BoardEditorSheet: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
-                        store.createBoard(
-                            name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled Board" : name,
-                            repositoryName: repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? name : repositoryName,
-                            repositoryPath: repositoryPath
-                        )
-                        dismiss()
+                    Button(mode.confirmationTitle) {
+                        save()
                     }
+                    .disabled(confirmationDisabled)
                 }
             }
         }
+        .fileImporter(
+            isPresented: $showingFolderPicker,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            guard let url = try? result.get().first else { return }
+            selectFolder(url)
+        }
         #if os(macOS)
-        .frame(minWidth: 420, minHeight: 240)
+        .frame(minWidth: 460, minHeight: 320)
         #endif
+    }
+
+    private var createForm: some View {
+        Group {
+            Section("Board") {
+                TextField("Name", text: $name)
+                TextField("Repository", text: $repositoryName)
+            }
+
+            Section("Repository Folder") {
+                folderPickerRow
+
+                if selectedFolderHasBeadsProject {
+                    Text("This folder already contains a .beads project. Use Import Existing Beads Project to bring those beads into the board.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var importForm: some View {
+        Section("Existing Beads Project") {
+            folderPickerRow
+
+            if let selectedRepositoryURL {
+                if selectedFolderHasBeadsProject {
+                    Label("A .beads project will be imported from \(selectedRepositoryURL.lastPathComponent).", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("Choose a repository folder that contains a .beads directory.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            } else {
+                Text("Choose a repository folder or its .beads directory.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var folderPickerRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button {
+                    showingFolderPicker = true
+                } label: {
+                    Label("Choose Folder", systemImage: "folder")
+                }
+
+                if selectedRepositoryURL != nil {
+                    Button("Clear") {
+                        selectedRepositoryURL = nil
+                        selectedFolderHasBeadsProject = false
+                    }
+                }
+            }
+
+            Text(selectedRepositoryURL?.path(percentEncoded: false) ?? "No folder selected")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func selectFolder(_ url: URL) {
+        selectedRepositoryURL = url
+        selectedFolderHasBeadsProject = BeadsProjectImporter.hasBeadsProject(at: url)
+
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            name = url.lastPathComponent == ".beads" ? url.deletingLastPathComponent().lastPathComponent : url.lastPathComponent
+        }
+
+        if repositoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            repositoryName = name
+        }
+    }
+
+    private func save() {
+        switch mode {
+        case .create:
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let boardName = trimmedName.isEmpty ? "Untitled Board" : trimmedName
+            let trimmedRepositoryName = repositoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+            store.createBoard(
+                name: boardName,
+                repositoryName: trimmedRepositoryName.isEmpty ? boardName : trimmedRepositoryName,
+                repositoryPath: selectedRepositoryURL?.path(percentEncoded: false)
+            )
+        case .importExisting:
+            guard let selectedRepositoryURL else { return }
+            store.importBeadsProject(at: selectedRepositoryURL)
+        }
+        dismiss()
+    }
+
+    private var confirmationDisabled: Bool {
+        switch mode {
+        case .create:
+            selectedFolderHasBeadsProject
+        case .importExisting:
+            !selectedFolderHasBeadsProject
+        }
     }
 }
 
@@ -899,6 +1064,7 @@ enum BeadEditorMode {
         case .edit: "Edit Bead"
         }
     }
+
 }
 
 struct BeadEditorSheet: View {
