@@ -84,7 +84,7 @@ struct PreviewRepositorySource: RepositorySource {
     }
 
     func suggestedBeads() async throws -> [Bead] {
-        BoardStore.sampleBoards[0].columns.flatMap(\.beads)
+        []
     }
 }
 

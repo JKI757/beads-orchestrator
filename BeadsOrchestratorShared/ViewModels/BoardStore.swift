@@ -23,11 +23,15 @@ final class BoardStore: ObservableObject {
     ) {
         self.persistenceURL = persistenceURL
 
-        let initialBoards = boards ?? Self.loadBoards(from: persistenceURL) ?? BoardStore.sampleBoards
+        let loadedBoards = boards ?? Self.loadBoards(from: persistenceURL) ?? []
+        let initialBoards = Self.removingBundledSampleContent(from: loadedBoards)
         self.boards = initialBoards
         self.selectedBoardID = initialBoards.first?.id
         self.selectedBeadID = initialBoards.first?.columns.first?.beads.first?.id
         self.remoteConfiguration = Self.loadRemoteConfiguration()
+        if initialBoards != loadedBoards {
+            persist(syncRemote: false)
+        }
     }
 
     var selectedBoard: Board? {
@@ -360,6 +364,39 @@ final class BoardStore: ObservableObject {
         ].joined(separator: "|")
     }
 
+    private static func removingBundledSampleContent(from boards: [Board]) -> [Board] {
+        boards.compactMap { board in
+            var migratedBoard = board
+            migratedBoard.columns = migratedBoard.columns.map { column in
+                var migratedColumn = column
+                migratedColumn.beads = migratedColumn.beads.filter { !isBundledSampleBead($0) }
+                return migratedColumn
+            }
+
+            let isEmptyDefaultSampleBoard = migratedBoard.name == "Beads Orchestrator"
+                && migratedBoard.repositoryName == "Beads-Orchestrator"
+                && migratedBoard.repositoryPath == nil
+                && migratedBoard.columns.map(\.name) == defaultColumns.map(\.name)
+                && migratedBoard.columns.allSatisfy { $0.beads.isEmpty }
+
+            return isEmptyDefaultSampleBoard ? nil : migratedBoard
+        }
+    }
+
+    private static func isBundledSampleBead(_ bead: Bead) -> Bool {
+        switch (bead.title, bead.summary) {
+        case ("Design local Git scanner", "Read branches, remotes, dirty files, and recent commits without mutating the repository."),
+             ("Define import rules", "Keep the first generated board focused on active PRs, assigned issues, and local changes."),
+             ("Create shared SwiftUI board", "Reusable kanban columns and bead cards for macOS, iPadOS, and iOS."),
+             ("Scaffold single Xcode project", "One project with iOS/iPadOS and macOS targets consuming shared source."),
+             ("Confirm GitHub OAuth scopes", "Choose minimum scopes for issue and pull request import."),
+             ("Review board terminology", "Decide whether the UI says bead, card, or both."):
+            true
+        default:
+            false
+        }
+    }
+
     private static var defaultColumns: [BoardColumn] {
         ["Backlog", "Ready", "In Progress", "Blocked", "Review", "Done"].map { BoardColumn(name: $0) }
     }
@@ -377,83 +414,6 @@ final class BoardStore: ObservableObject {
             .deletingLastPathComponent()
             .appendingPathComponent("remote-server.json")
     }
-
-    nonisolated static let sampleBoards: [Board] = [
-        Board(
-            name: "Beads Orchestrator",
-            repositoryName: "Beads-Orchestrator",
-            columns: [
-                BoardColumn(
-                    name: "Backlog",
-                    beads: [
-                        Bead(
-                            title: "Design local Git scanner",
-                            summary: "Read branches, remotes, dirty files, and recent commits without mutating the repository.",
-                            sourceType: .manual,
-                            labels: ["git", "mvp"],
-                            priority: .high
-                        ),
-                        Bead(
-                            title: "Define import rules",
-                            summary: "Keep the first generated board focused on active PRs, assigned issues, and local changes.",
-                            labels: ["product"]
-                        )
-                    ]
-                ),
-                BoardColumn(
-                    name: "Ready",
-                    beads: [
-                        Bead(
-                            title: "Create shared SwiftUI board",
-                            summary: "Reusable kanban columns and bead cards for macOS, iPadOS, and iOS.",
-                            labels: ["swiftui", "shared"],
-                            priority: .high
-                        )
-                    ]
-                ),
-                BoardColumn(
-                    name: "In Progress",
-                    beads: [
-                        Bead(
-                            title: "Scaffold single Xcode project",
-                            summary: "One project with iOS/iPadOS and macOS targets consuming shared source.",
-                            sourceType: .localGit,
-                            branchName: "main",
-                            labels: ["xcode"],
-                            priority: .urgent
-                        )
-                    ]
-                ),
-                BoardColumn(
-                    name: "Blocked",
-                    beads: [
-                        Bead(
-                            title: "Confirm GitHub OAuth scopes",
-                            summary: "Choose minimum scopes for issue and pull request import.",
-                            sourceType: .githubIssue,
-                            issueNumber: 12,
-                            labels: ["github", "security"],
-                            isBlocked: true
-                        )
-                    ]
-                ),
-                BoardColumn(
-                    name: "Review",
-                    beads: [
-                        Bead(
-                            title: "Review board terminology",
-                            summary: "Decide whether the UI says bead, card, or both.",
-                            sourceType: .githubPullRequest,
-                            pullRequestNumber: 4,
-                            labels: ["copy"],
-                            isStale: true
-                        )
-                    ]
-                ),
-                BoardColumn(name: "Done")
-            ]
-        )
-    ]
 }
 
 struct BeadDraft {

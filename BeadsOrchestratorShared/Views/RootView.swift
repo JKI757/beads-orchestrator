@@ -97,8 +97,19 @@ struct RootView: View {
                             NSPasteboard.general.setString(server.pairingPayloadString, forType: .string)
                         }
 
+                        Button("Copy Pairing Token") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(server.pairingToken, forType: .string)
+                        }
+
                         Button("Regenerate Pairing Token") {
                             server.regeneratePairingToken()
+                        }
+
+                        Button("Regenerate and Copy Token") {
+                            server.regeneratePairingToken()
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(server.pairingToken, forType: .string)
                         }
                     }
 
@@ -132,7 +143,7 @@ struct RootView: View {
                     }
                     #endif
                 } label: {
-                    Label("Add", systemImage: "plus")
+                    Label("Boards", systemImage: "rectangle.stack")
                 }
             }
         }
@@ -701,6 +712,11 @@ private struct PairingCodeSheet: View {
                 Button("Copy Pairing Payload") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(server.pairingPayloadString, forType: .string)
+                }
+
+                Button("Copy Token") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(server.pairingToken, forType: .string)
                 }
 
                 Button("Regenerate Token") {

@@ -38,6 +38,14 @@ private struct FormBeadInspector: View {
 
     var body: some View {
         Form {
+            Section {
+                Button {
+                    showingEditor = true
+                } label: {
+                    Label("Edit Bead", systemImage: "square.and.pencil")
+                }
+            }
+
             Section("Overview") {
                 LabeledContent("Title", value: bead.title)
                 LabeledContent("Source", value: bead.sourceType.displayName)
@@ -77,13 +85,6 @@ private struct FormBeadInspector: View {
             WorkflowSection(bead: bead)
         }
         .navigationTitle("Bead")
-        .toolbar {
-            Button {
-                showingEditor = true
-            } label: {
-                Label("Edit", systemImage: "square.and.pencil")
-            }
-        }
         .sheet(isPresented: $showingEditor) {
             BeadEditorSheet(mode: .edit(bead))
         }
@@ -98,9 +99,23 @@ private struct TabletLandscapeBeadInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(bead.title)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(3)
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(bead.title)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(3)
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            showingEditor = true
+                        } label: {
+                            Label("Edit Bead", systemImage: "square.and.pencil")
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Edit Bead")
+                    }
+
                     HStack(spacing: 8) {
                         Text(bead.sourceType.displayName)
                         Text(bead.priority.rawValue.capitalized)
@@ -146,13 +161,6 @@ private struct TabletLandscapeBeadInspector: View {
             .padding(20)
         }
         .navigationTitle("Bead")
-        .toolbar {
-            Button {
-                showingEditor = true
-            } label: {
-                Label("Edit", systemImage: "square.and.pencil")
-            }
-        }
         .sheet(isPresented: $showingEditor) {
             BeadEditorSheet(mode: .edit(bead))
         }
@@ -237,10 +245,24 @@ private struct MacBeadInspector: View {
                     Label("Inspector", systemImage: "sidebar.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(bead.title)
-                        .font(.title2.weight(.semibold))
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(bead.title)
+                            .font(.title2.weight(.semibold))
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            showingEditor = true
+                        } label: {
+                            Label("Edit Bead", systemImage: "square.and.pencil")
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.bordered)
+                        .help("Edit Bead")
+                    }
 
                     HStack(spacing: 6) {
                         MacStatusPill(text: bead.sourceType.displayName, systemImage: "note.text")
@@ -307,13 +329,6 @@ private struct MacBeadInspector: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationSplitViewColumnWidth(min: 300, ideal: 340, max: 400)
         .navigationTitle("Bead")
-        .toolbar {
-            Button {
-                showingEditor = true
-            } label: {
-                Label("Edit", systemImage: "square.and.pencil")
-            }
-        }
         .sheet(isPresented: $showingEditor) {
             BeadEditorSheet(mode: .edit(bead))
         }
