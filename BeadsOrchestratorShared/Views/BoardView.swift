@@ -10,14 +10,35 @@ struct BoardView: View {
     let board: Board
     var presentation: BoardPresentation = .automatic
     @State private var newColumnName = ""
+    @State private var showsRelationshipOverlay = true
+
+    private var relationshipFocus: RelationshipFocus? {
+        guard
+            let selectedBead = store.selectedBead,
+            board.columns.flatMap(\.beads).contains(where: { $0.id == selectedBead.id }),
+            !selectedBead.childBeadsIDs.isEmpty
+        else { return nil }
+
+        return RelationshipFocus(
+            parentID: selectedBead.id,
+            childIDs: Set(store.childBeads(for: selectedBead).map(\.id)),
+            totalChildCount: selectedBead.childBeadsIDs.count
+        )
+    }
 
     var body: some View {
         GeometryReader { proxy in
             let metrics = BoardMetrics(containerSize: proxy.size, presentation: presentation)
+            let activeRelationshipFocus = showsRelationshipOverlay ? relationshipFocus : nil
 
             VStack(spacing: 0) {
                 if metrics.showsHeader {
-                    BoardHeader(board: board, isCompact: metrics.isCompactHeader)
+                    BoardHeader(
+                        board: board,
+                        isCompact: metrics.isCompactHeader,
+                        relationshipOverlayAvailable: relationshipFocus != nil,
+                        showsRelationshipOverlay: $showsRelationshipOverlay
+                    )
                 }
 
                 ScrollView(.horizontal) {
@@ -27,7 +48,8 @@ struct BoardView: View {
                                 column: column,
                                 beads: store.visibleBeads(in: column),
                                 width: metrics.columnWidth,
-                                density: metrics.cardDensity
+                                density: metrics.cardDensity,
+                                relationshipFocus: activeRelationshipFocus
                             )
                         }
 
@@ -35,6 +57,18 @@ struct BoardView: View {
                             .frame(width: metrics.addColumnWidth)
                     }
                     .padding(metrics.outerPadding)
+                }
+            }
+            .overlayPreferenceValue(BeadCardBoundsPreferenceKey.self) { anchors in
+                RelationshipLinesOverlay(focus: activeRelationshipFocus, anchors: anchors)
+            }
+            .overlay(alignment: .topTrailing) {
+                if !metrics.showsHeader, relationshipFocus != nil {
+                    RelationshipOverlayToggle(
+                        isOn: $showsRelationshipOverlay,
+                        hiddenChildCount: hiddenChildCount(anchors: [:])
+                    )
+                    .padding(12)
                 }
             }
         }
@@ -47,6 +81,12 @@ struct BoardView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .navigationTitle(board.name)
+    }
+
+    private func hiddenChildCount(anchors: [Bead.ID: Anchor<CGRect>]) -> Int {
+        guard let focus = relationshipFocus else { return 0 }
+        let visibleChildCount = focus.childIDs.filter { anchors[$0] != nil }.count
+        return max(focus.totalChildCount - visibleChildCount, 0)
     }
 }
 
@@ -134,6 +174,20 @@ private struct BoardHeader: View {
     @EnvironmentObject private var store: BoardStore
     let board: Board
     var isCompact = false
+    var relationshipOverlayAvailable = false
+    @Binding var showsRelationshipOverlay: Bool
+
+    init(
+        board: Board,
+        isCompact: Bool = false,
+        relationshipOverlayAvailable: Bool = false,
+        showsRelationshipOverlay: Binding<Bool> = .constant(true)
+    ) {
+        self.board = board
+        self.isCompact = isCompact
+        self.relationshipOverlayAvailable = relationshipOverlayAvailable
+        self._showsRelationshipOverlay = showsRelationshipOverlay
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -170,6 +224,10 @@ private struct BoardHeader: View {
                     .background(Color.orange.opacity(0.15), in: Capsule())
             }
 
+            if relationshipOverlayAvailable {
+                RelationshipOverlayToggle(isOn: $showsRelationshipOverlay)
+            }
+
             StatusReportButton(board: board, compact: true)
         }
         .padding(.horizontal, isCompact ? 12 : 16)
@@ -184,6 +242,86 @@ private struct BoardHeader: View {
         #else
         .background(.bar)
         #endif
+    }
+}
+
+private struct RelationshipFocus: Equatable {
+    var parentID: Bead.ID
+    var childIDs: Set<Bead.ID>
+    var totalChildCount: Int
+}
+
+private struct BeadCardBoundsPreferenceKey: PreferenceKey {
+    static var defaultValue: [Bead.ID: Anchor<CGRect>] = [:]
+
+    static func reduce(value: inout [Bead.ID: Anchor<CGRect>], nextValue: () -> [Bead.ID: Anchor<CGRect>]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private struct RelationshipLinesOverlay: View {
+    let focus: RelationshipFocus?
+    let anchors: [Bead.ID: Anchor<CGRect>]
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let focus, let parentAnchor = anchors[focus.parentID] {
+                let parentRect = proxy[parentAnchor]
+                let childRects = focus.childIDs.compactMap { childID in
+                    anchors[childID].map { proxy[$0] }
+                }
+                let hiddenCount = max(focus.totalChildCount - childRects.count, 0)
+
+                ZStack(alignment: .topTrailing) {
+                    Path { path in
+                        let start = CGPoint(x: parentRect.maxX, y: parentRect.midY)
+                        for childRect in childRects {
+                            let end = CGPoint(x: childRect.minX, y: childRect.midY)
+                            let controlOffset = max(abs(end.x - start.x) * 0.35, 36)
+                            path.move(to: start)
+                            path.addCurve(
+                                to: end,
+                                control1: CGPoint(x: start.x + controlOffset, y: start.y),
+                                control2: CGPoint(x: end.x - controlOffset, y: end.y)
+                            )
+                        }
+                    }
+                    .stroke(Color.accentColor.opacity(0.42), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [6, 5]))
+
+                    if hiddenCount > 0 {
+                        Text("\(hiddenCount) child\(hiddenCount == 1 ? "" : "ren") hidden")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(12)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+private struct RelationshipOverlayToggle: View {
+    @Binding var isOn: Bool
+    var hiddenChildCount: Int = 0
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            Label(
+                hiddenChildCount > 0 ? "\(hiddenChildCount) Hidden" : "Relationships",
+                systemImage: isOn ? "point.3.connected.trianglepath.dotted" : "eye.slash"
+            )
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(isOn ? "Hide Relationship Lines" : "Show Relationship Lines")
     }
 }
 
@@ -405,6 +543,7 @@ private struct ColumnView: View {
     let beads: [Bead]
     let width: CGFloat
     let density: BeadCardDensity
+    let relationshipFocus: RelationshipFocus?
     @State private var isRenaming = false
     @State private var columnName = ""
 
@@ -480,6 +619,15 @@ private struct ColumnView: View {
                     ForEach(beads) { bead in
                         BeadCardView(bead: bead, density: density)
                             .frame(width: contentWidth, alignment: .leading)
+                            .overlay {
+                                if let relationshipHighlight = relationshipHighlight(for: bead) {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .stroke(relationshipHighlight.color, lineWidth: relationshipHighlight.lineWidth)
+                                }
+                            }
+                            .anchorPreference(key: BeadCardBoundsPreferenceKey.self, value: .bounds) { anchor in
+                                [bead.id: anchor]
+                            }
                     }
                 }
                 .frame(width: contentWidth, alignment: .leading)
@@ -507,6 +655,17 @@ private struct ColumnView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         #endif
+    }
+
+    private func relationshipHighlight(for bead: Bead) -> (color: Color, lineWidth: CGFloat)? {
+        guard let relationshipFocus else { return nil }
+        if relationshipFocus.parentID == bead.id {
+            return (.accentColor, 2)
+        }
+        if relationshipFocus.childIDs.contains(bead.id) {
+            return (.accentColor.opacity(0.65), 1.5)
+        }
+        return nil
     }
 }
 
