@@ -50,7 +50,11 @@ struct RootView: View {
                 case .hierarchy:
                     HierarchyView(board: board, presentation: .mac)
                 case .aiPM:
+                    #if os(macOS)
                     AIPMWorkspaceView(pmState: server.aiPMState)
+                    #else
+                    RemoteAIPMWorkspaceView()
+                    #endif
                 }
             } else {
                 ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
@@ -1198,11 +1202,230 @@ private struct LLMSettingsSheet: View {
 }
 
 private struct AIPMWorkspaceView: View {
+    @EnvironmentObject private var server: BeadsHTTPServer
+    @EnvironmentObject private var store: BoardStore
     @ObservedObject var pmState: AIPMStateStore
 
+    @State private var draft = AIPMAutomationSettings()
+    @State private var isRunning = false
+    @State private var errorMessage: String?
+    @State private var proposalToApply: AIPMDecisionProposal?
+
     var body: some View {
-        AIPMDashboardContent(pmState: pmState)
-            .navigationTitle("AI PM")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                    AIPMMetricCard(title: "Pending", value: "\(pmState.state.pendingProposals.count)", systemImage: "exclamationmark.bubble")
+                    AIPMMetricCard(title: "High Risk", value: "\(pmState.state.highRiskPendingProposals.count)", systemImage: "exclamationmark.triangle")
+                    AIPMMetricCard(title: "Reports", value: "\(pmState.state.reports.count)", systemImage: "chart.bar.doc.horizontal")
+                    AIPMMetricCard(title: "Signals", value: "\(pmState.state.latestIntelligence?.signals.count ?? 0)", systemImage: "waveform.path.ecg")
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(pmState.state.lastRunSummary ?? "No AI PM run has completed yet.")
+                                    .font(.headline)
+                                Text("Last run: \(lastRunText)  •  Next run: \(nextRunText)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if isRunning {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+
+                        if let error = errorMessage ?? pmState.state.lastRunError, !error.isEmpty {
+                            Text(error)
+                                .foregroundStyle(.red)
+                        }
+
+                        Text(server.llmConfiguration.status.message)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } label: {
+                    Label("Status", systemImage: "sparkles")
+                }
+
+                GroupBox {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                        Toggle("AI PM enabled", isOn: $draft.isEnabled)
+                        Toggle("Review backlog", isOn: $draft.reviewsBacklog)
+                        Toggle("Generate reports", isOn: $draft.generatesReports)
+                        Toggle("Notify on this Mac", isOn: $draft.sendsNotifications)
+                        Picker("Cadence", selection: $draft.cadence) {
+                            ForEach(AIPMCadence.allCases) { cadence in
+                                Text(cadence.displayName).tag(cadence)
+                            }
+                        }
+                        Picker("Autonomy", selection: $draft.autonomyLevel) {
+                            ForEach(AIPMAutonomyLevel.allCases) { autonomy in
+                                Text(autonomy.displayName).tag(autonomy)
+                            }
+                        }
+                        Stepper(value: $draft.maximumProposals, in: 1...20) {
+                            Text("Max proposals: \(draft.maximumProposals)")
+                        }
+                    }
+                } label: {
+                    Label("Automation", systemImage: "slider.horizontal.3")
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 16)], spacing: 16) {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if pmState.state.pendingProposals.isEmpty {
+                                Text("No pending decisions.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(pmState.state.pendingProposals.prefix(6)) { proposal in
+                                    AIPMProposalRow(
+                                        proposal: proposal,
+                                        applyProposal: {
+                                            if proposal.changes.isEmpty {
+                                                pmState.updateProposal(proposal.id, status: .accepted)
+                                            } else {
+                                                proposalToApply = proposal
+                                            }
+                                        },
+                                        updateStatus: { status in
+                                            pmState.updateProposal(proposal.id, status: status)
+                                        }
+                                    )
+                                    Divider()
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Pending Decisions", systemImage: "person.crop.circle.badge.exclamationmark")
+                    }
+
+                    GroupBox {
+                        if let intelligence = pmState.state.latestIntelligence {
+                            AIPMProjectIntelligenceView(intelligence: intelligence)
+                        } else {
+                            Text("No project intelligence generated yet.")
+                                .foregroundStyle(.secondary)
+                        }
+                    } label: {
+                        Label("Project Intelligence", systemImage: "waveform.path.ecg")
+                    }
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if pmState.state.reports.isEmpty {
+                                Text("No reports generated yet.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(pmState.state.reports.prefix(4)) { report in
+                                    AIPMReportRow(report: report)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Recent Reports", systemImage: "doc.text.magnifyingglass")
+                    }
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if pmState.state.auditEvents.isEmpty {
+                                Text("No audit events yet.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(pmState.state.auditEvents.prefix(6)) { event in
+                                    AIPMAuditEventRow(event: event)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Audit History", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .navigationTitle("AI PM")
+        .toolbar {
+            ToolbarItemGroup {
+                Button {
+                    Task { await runPM() }
+                } label: {
+                    Label("Run AI PM", systemImage: "play.circle")
+                }
+                .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
+
+                Button {
+                    save()
+                } label: {
+                    Label("Save", systemImage: "checkmark.circle")
+                }
+            }
+        }
+        .onAppear {
+            draft = pmState.state.settings
+        }
+        .sheet(item: $proposalToApply) { proposal in
+            AIPMProposalApplySheet(proposal: proposal) { status in
+                pmState.updateProposal(proposal.id, status: status)
+            }
+            .environmentObject(store)
+        }
+    }
+
+    private var lastRunText: String {
+        guard let date = pmState.state.lastRunAt else { return "Never" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var nextRunText: String {
+        guard pmState.state.settings.isEnabled, pmState.state.settings.cadence != .manual else { return "Not scheduled" }
+        guard let date = pmState.state.nextRunAt else { return "Pending" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func save() {
+        server.saveAIPMSettings(draft)
+        draft = pmState.state.settings
+    }
+
+    private func runPM() async {
+        save()
+        isRunning = true
+        errorMessage = nil
+        defer { isRunning = false }
+
+        do {
+            _ = try await server.runAIPM()
+            draft = pmState.state.settings
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct AIPMMetricCard: View {
+    let title: String
+    let value: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title2.weight(.semibold))
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
