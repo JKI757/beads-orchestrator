@@ -3,12 +3,21 @@ package beads
 import "time"
 
 type ServerInfo struct {
-	Name         string    `json:"name"`
-	Version      string    `json:"version"`
-	BoardCount   int       `json:"boardCount"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-	AuthRequired bool      `json:"authRequired"`
-	Capabilities []string  `json:"capabilities"`
+	Name         string     `json:"name"`
+	Version      string     `json:"version"`
+	BoardCount   int        `json:"boardCount"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	AuthRequired bool       `json:"authRequired"`
+	Capabilities []string   `json:"capabilities"`
+	LLMStatus    *LLMStatus `json:"llmStatus,omitempty"`
+}
+
+type LLMStatus struct {
+	IsAvailable bool      `json:"isAvailable"`
+	Provider    string    `json:"provider"`
+	Model       *string   `json:"model,omitempty"`
+	Message     string    `json:"message"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type Board struct {

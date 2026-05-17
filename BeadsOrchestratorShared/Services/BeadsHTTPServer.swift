@@ -8,11 +8,16 @@ final class BeadsHTTPServer: ObservableObject {
     @Published private(set) var statusMessage = "Server stopped"
     @Published private(set) var listeningURLString = ""
     @Published private(set) var pairingToken = UUID().uuidString
+    let llmConfiguration: LLMServerConfigurationStore
 
     private weak var store: BoardStore?
     private var socketFD: Int32 = -1
     private let queue = DispatchQueue(label: "com.beadsorchestrator.http-server", qos: .userInitiated)
     private let port: UInt16 = 8787
+
+    init(llmConfiguration: LLMServerConfigurationStore? = nil) {
+        self.llmConfiguration = llmConfiguration ?? LLMServerConfigurationStore()
+    }
 
     func configure(store: BoardStore) {
         self.store = store
@@ -189,6 +194,12 @@ final class BeadsHTTPServer: ObservableObject {
                 }
                 return try jsonResponse(store.boards)
 
+            case ("GET", "/llm/status"):
+                guard isAuthorized(request) else {
+                    return httpResponse(status: 401, body: Data())
+                }
+                return try jsonResponse(llmConfiguration.status)
+
             case ("PUT", "/boards"):
                 guard isAuthorized(request) else {
                     return httpResponse(status: 401, body: Data())
@@ -218,8 +229,10 @@ final class BeadsHTTPServer: ObservableObject {
                 "bearer-auth",
                 "board-snapshot-read",
                 "board-snapshot-replace",
-                "beads-relationship-metadata"
-            ]
+                "beads-relationship-metadata",
+                "server-side-llm-status"
+            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance"] : []),
+            llmStatus: llmConfiguration.status
         )
     }
 

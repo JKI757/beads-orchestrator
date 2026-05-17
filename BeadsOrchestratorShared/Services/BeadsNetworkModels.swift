@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 struct BeadsServerInfo: Codable, Equatable {
     var name: String
@@ -7,6 +8,15 @@ struct BeadsServerInfo: Codable, Equatable {
     var updatedAt: Date
     var authRequired: Bool
     var capabilities: [String]
+    var llmStatus: BeadsLLMStatus?
+}
+
+struct BeadsLLMStatus: Codable, Equatable {
+    var isAvailable: Bool
+    var provider: String
+    var model: String?
+    var message: String
+    var updatedAt: Date
 }
 
 struct BeadsRemoteConfiguration: Codable, Equatable {
@@ -74,3 +84,193 @@ enum BeadsJSON {
         return decoder
     }()
 }
+
+enum LLMProviderKind: String, Codable, CaseIterable, Identifiable {
+    case disabled
+    case localOpenAICompatible
+    case remoteOpenAICompatible
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .disabled:
+            "Disabled"
+        case .localOpenAICompatible:
+            "Local OpenAI-Compatible"
+        case .remoteOpenAICompatible:
+            "Remote OpenAI-Compatible"
+        }
+    }
+
+    var requiresEndpoint: Bool {
+        self != .disabled
+    }
+
+    var requiresAPIKey: Bool {
+        self == .remoteOpenAICompatible
+    }
+}
+
+struct LLMServerConfiguration: Codable, Equatable {
+    var provider: LLMProviderKind
+    var endpointURLString: String
+    var modelName: String
+    var apiKey: String
+
+    init(
+        provider: LLMProviderKind = .disabled,
+        endpointURLString: String = "http://127.0.0.1:11434/v1",
+        modelName: String = "",
+        apiKey: String = ""
+    ) {
+        self.provider = provider
+        self.endpointURLString = endpointURLString
+        self.modelName = modelName
+        self.apiKey = apiKey
+    }
+
+    var trimmedEndpointURLString: String {
+        endpointURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedModelName: String {
+        modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedAPIKey: String {
+        apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var endpointURL: URL? {
+        URL(string: trimmedEndpointURLString)
+    }
+}
+
+#if os(macOS)
+@MainActor
+final class LLMServerConfigurationStore: ObservableObject {
+    @Published private(set) var configuration: LLMServerConfiguration
+    @Published private var lastFailureMessage: String?
+
+    private let persistenceURL: URL
+
+    init(persistenceURL: URL? = nil) {
+        let persistenceURL = persistenceURL ?? Self.defaultPersistenceURL
+        self.persistenceURL = persistenceURL
+        self.configuration = Self.loadConfiguration(from: persistenceURL) ?? LLMServerConfiguration()
+    }
+
+    var status: BeadsLLMStatus {
+        sanitizedStatus(for: configuration)
+    }
+
+    func save(_ configuration: LLMServerConfiguration) {
+        var sanitizedConfiguration = configuration
+        sanitizedConfiguration.endpointURLString = configuration.trimmedEndpointURLString
+        sanitizedConfiguration.modelName = configuration.trimmedModelName
+        sanitizedConfiguration.apiKey = configuration.trimmedAPIKey
+        self.configuration = sanitizedConfiguration
+        lastFailureMessage = nil
+        persist()
+    }
+
+    func recordProviderFailure(_ message: String) {
+        lastFailureMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sanitizedStatus(for configuration: LLMServerConfiguration) -> BeadsLLMStatus {
+        let providerName = configuration.provider.displayName
+        let modelName = configuration.trimmedModelName
+
+        guard configuration.provider != .disabled else {
+            return BeadsLLMStatus(
+                isAvailable: false,
+                provider: providerName,
+                model: nil,
+                message: "Planning assistance is disabled on this Mac.",
+                updatedAt: Date()
+            )
+        }
+
+        guard isValidEndpoint(configuration.endpointURL) else {
+            return BeadsLLMStatus(
+                isAvailable: false,
+                provider: providerName,
+                model: modelName.isEmpty ? nil : modelName,
+                message: "Enter a valid HTTP endpoint for the LLM provider.",
+                updatedAt: Date()
+            )
+        }
+
+        guard !modelName.isEmpty else {
+            return BeadsLLMStatus(
+                isAvailable: false,
+                provider: providerName,
+                model: nil,
+                message: "Choose a model before enabling planning assistance.",
+                updatedAt: Date()
+            )
+        }
+
+        if configuration.provider.requiresAPIKey, configuration.trimmedAPIKey.isEmpty {
+            return BeadsLLMStatus(
+                isAvailable: false,
+                provider: providerName,
+                model: modelName,
+                message: "Add an API key for the remote LLM provider.",
+                updatedAt: Date()
+            )
+        }
+
+        if let lastFailureMessage, !lastFailureMessage.isEmpty {
+            return BeadsLLMStatus(
+                isAvailable: false,
+                provider: providerName,
+                model: modelName,
+                message: "LLM provider failed safely: \(lastFailureMessage)",
+                updatedAt: Date()
+            )
+        }
+
+        return BeadsLLMStatus(
+            isAvailable: true,
+            provider: providerName,
+            model: modelName,
+            message: "Planning assistance is configured on the Mac server.",
+            updatedAt: Date()
+        )
+    }
+
+    private func isValidEndpoint(_ url: URL?) -> Bool {
+        guard let url, let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
+    private func persist() {
+        do {
+            let directory = persistenceURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try BeadsJSON.encoder.encode(configuration)
+            try data.write(to: persistenceURL, options: [.atomic])
+        } catch {
+            lastFailureMessage = "Could not save LLM configuration."
+        }
+    }
+
+    private static func loadConfiguration(from url: URL) -> LLMServerConfiguration? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? BeadsJSON.decoder.decode(LLMServerConfiguration.self, from: data)
+    }
+
+    private static var defaultPersistenceURL: URL {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return root
+            .appendingPathComponent("Beads-Orchestrator", isDirectory: true)
+            .appendingPathComponent("llm-configuration.json")
+    }
+}
+#endif

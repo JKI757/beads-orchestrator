@@ -23,6 +23,7 @@ struct RootView: View {
     @State private var workspaceMode: WorkspaceMode = .board
     #if os(macOS)
     @State private var showingPairingCode = false
+    @State private var showingLLMSettings = false
     #endif
 
     var body: some View {
@@ -123,6 +124,14 @@ struct RootView: View {
                         }
                     }
 
+                    Divider()
+
+                    Button("LLM Settings") {
+                        showingLLMSettings = true
+                    }
+
+                    Text(server.llmConfiguration.status.message)
+
                     Text(server.statusMessage)
                 } label: {
                     Label(server.isRunning ? "Server On" : "Server Off", systemImage: server.isRunning ? "network" : "network.slash")
@@ -177,6 +186,9 @@ struct RootView: View {
         .sheet(isPresented: $showingPairingCode) {
             PairingCodeSheet()
                 .environmentObject(server)
+        }
+        .sheet(isPresented: $showingLLMSettings) {
+            LLMSettingsSheet(configurationStore: server.llmConfiguration)
         }
         #endif
         #if os(macOS)
@@ -781,6 +793,16 @@ private struct ConnectionSettingsSheet: View {
                         LabeledContent("Boards", value: "\(info.boardCount)")
                         LabeledContent("Version", value: info.version)
                         LabeledContent("Auth", value: info.authRequired ? "Required" : "Open")
+
+                        if let llmStatus = info.llmStatus {
+                            LabeledContent("AI Planning", value: llmStatus.isAvailable ? "Available" : "Unavailable")
+                            LabeledContent("AI Provider", value: llmStatus.provider)
+                            if let model = llmStatus.model {
+                                LabeledContent("AI Model", value: model)
+                            }
+                            Text(llmStatus.message)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -866,6 +888,79 @@ private struct ConnectionSettingsSheet: View {
 }
 
 #if os(macOS)
+private struct LLMSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var configurationStore: LLMServerConfigurationStore
+    @State private var draft = LLMServerConfiguration()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section("Provider") {
+                    Picker("Provider", selection: $draft.provider) {
+                        ForEach(LLMProviderKind.allCases) { provider in
+                            Text(provider.displayName).tag(provider)
+                        }
+                    }
+
+                    if draft.provider.requiresEndpoint {
+                        TextField("Endpoint URL", text: $draft.endpointURLString)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Model", text: $draft.modelName)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    if draft.provider.requiresAPIKey {
+                        SecureField("API key", text: $draft.apiKey)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+
+                Section("Status") {
+                    let status = configurationStore.status
+                    LabeledContent("Availability", value: status.isAvailable ? "Available" : "Unavailable")
+                    LabeledContent("Provider", value: status.provider)
+                    if let model = status.model {
+                        LabeledContent("Model", value: model)
+                    }
+                    Text(status.message)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack {
+                Button("Disable") {
+                    draft.provider = .disabled
+                    configurationStore.save(draft)
+                    dismiss()
+                }
+
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+
+                Button("Save") {
+                    configurationStore.save(draft)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+        }
+        .navigationTitle("LLM Settings")
+        .frame(width: 520)
+        .frame(minHeight: 360)
+        .onAppear {
+            draft = configurationStore.configuration
+        }
+    }
+}
+
 private struct PairingCodeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var server: BeadsHTTPServer

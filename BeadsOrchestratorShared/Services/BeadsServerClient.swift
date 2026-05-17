@@ -28,6 +28,10 @@ struct BeadsServerClient {
         try validate(response)
     }
 
+    func llmStatus() async throws -> BeadsLLMStatus {
+        try await get("llm/status", as: BeadsLLMStatus.self)
+    }
+
     private func get<Value: Decodable>(_ path: String, as type: Value.Type, requiresAuth: Bool = true) async throws -> Value {
         var request = URLRequest(url: endpoint(path))
         if requiresAuth {

@@ -59,6 +59,12 @@ func (c *Client) Boards(ctx context.Context) ([]Board, error) {
 	return boards, err
 }
 
+func (c *Client) LLMStatus(ctx context.Context) (LLMStatus, error) {
+	var status LLMStatus
+	err := c.get(ctx, "llm/status", true, &status)
+	return status, err
+}
+
 func (c *Client) ReplaceBoards(ctx context.Context, boards []Board) error {
 	body, err := json.MarshalIndent(boards, "", "  ")
 	if err != nil {
