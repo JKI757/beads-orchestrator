@@ -33,6 +33,8 @@
 		A10000000000000000000024 /* BeadsNetworkModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* BeadsNetworkModels.swift */; };
 		A10000000000000000000025 /* BeadsServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* BeadsServerClient.swift */; };
 		A10000000000000000000026 /* BeadsHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* BeadsHTTPServer.swift */; };
+		A10000000000000000000027 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* Assets.xcassets */; };
+		A10000000000000000000028 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -50,6 +52,7 @@
 		A20000000000000000000012 /* BeadsNetworkModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsNetworkModels.swift; sourceTree = "<group>"; };
 		A20000000000000000000013 /* BeadsServerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsServerClient.swift; sourceTree = "<group>"; };
 		A20000000000000000000014 /* BeadsHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeadsHTTPServer.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000020 /* Beads-Orchestrator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Beads-Orchestrator.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000021 /* Beads-Orchestrator.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Beads-Orchestrator.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -97,6 +100,7 @@
 				A40000000000000000000007 /* ViewModels */,
 				A40000000000000000000008 /* Views */,
 				A40000000000000000000009 /* Services */,
+				A20000000000000000000015 /* Assets.xcassets */,
 			);
 			path = BeadsOrchestratorShared;
 			sourceTree = "<group>";
@@ -212,8 +216,8 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A70000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		A70000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A70000000000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000027 /* Assets.xcassets in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+		A70000000000000000000002 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000028 /* Assets.xcassets in Resources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -365,6 +369,8 @@
 		AA0000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -386,6 +392,8 @@
 		AA0000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -407,6 +415,8 @@
 		AA0000000000000000000005 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -429,6 +439,8 @@
 		AA0000000000000000000006 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
