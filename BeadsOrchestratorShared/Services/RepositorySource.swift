@@ -43,6 +43,21 @@ struct BeadsProjectImporter {
         return FileManager.default.fileExists(atPath: rootURL.appendingPathComponent(".beads", isDirectory: true).path(percentEncoded: false))
     }
 
+    static func issuesModificationDate(at url: URL) -> Date? {
+        let rootURL = normalizedProjectRoot(for: url)
+        let issuesURL = rootURL
+            .appendingPathComponent(".beads", isDirectory: true)
+            .appendingPathComponent("issues.jsonl")
+
+        guard
+            let values = try? issuesURL.resourceValues(forKeys: [.contentModificationDateKey])
+        else {
+            return nil
+        }
+
+        return values.contentModificationDate
+    }
+
     static func importBoard(from url: URL, defaultColumns: [BoardColumn]) throws -> Board {
         let didStartAccessing = url.startAccessingSecurityScopedResource()
         defer {

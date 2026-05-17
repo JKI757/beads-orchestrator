@@ -14,8 +14,10 @@ final class BoardStore: ObservableObject {
     @Published var remoteConfiguration = BeadsRemoteConfiguration(serverURLString: "")
     @Published var remoteStatusMessage = "Not connected"
     @Published var remoteServerInfo: BeadsServerInfo?
+    @Published var localRefreshStatusMessage: String?
 
     private let persistenceURL: URL
+    private var localBoardModificationDates: [Board.ID: Date] = [:]
 
     init(
         boards: [Board]? = nil,
@@ -102,10 +104,62 @@ final class BoardStore: ObservableObject {
         do {
             let board = try BeadsProjectImporter.importBoard(from: url, defaultColumns: Self.defaultColumns)
             boards.insert(board, at: 0)
+            localBoardModificationDates[board.id] = BeadsProjectImporter.issuesModificationDate(at: url)
             select(board)
             persist()
         } catch {
             importErrorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshLocalBoardFromDisk(_ boardID: Board.ID, reportsErrors: Bool = true) {
+        guard
+            let boardIndex = boards.firstIndex(where: { $0.id == boardID }),
+            let repositoryPath = boards[boardIndex].repositoryPath?.nilIfBlank
+        else { return }
+
+        let repositoryURL = URL(fileURLWithPath: repositoryPath, isDirectory: true)
+        do {
+            var refreshedBoard = try BeadsProjectImporter.importBoard(from: repositoryURL, defaultColumns: Self.defaultColumns)
+            let previousBoard = boards[boardIndex]
+            refreshedBoard.id = previousBoard.id
+            refreshedBoard.name = previousBoard.name
+            refreshedBoard.archivedAt = previousBoard.archivedAt
+            refreshedBoard.columns = Self.preservingExistingBeadIDs(
+                in: refreshedBoard.columns,
+                from: previousBoard.columns
+            )
+            refreshedBoard.updatedAt = .now
+            boards[boardIndex] = refreshedBoard
+            localBoardModificationDates[boardID] = BeadsProjectImporter.issuesModificationDate(at: repositoryURL)
+
+            if selectedBoardID == boardID, selectedBead == nil {
+                selectedBeadID = refreshedBoard.columns.flatMap(\.beads).first { !$0.isArchived }?.id
+            }
+
+            localRefreshStatusMessage = "Refreshed \(refreshedBoard.name) from disk"
+            persist()
+        } catch {
+            if reportsErrors {
+                importErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func refreshLocalBoardsFromDiskIfChanged() {
+        for board in boards {
+            guard let repositoryPath = board.repositoryPath?.nilIfBlank else { continue }
+            let repositoryURL = URL(fileURLWithPath: repositoryPath, isDirectory: true)
+            guard let modificationDate = BeadsProjectImporter.issuesModificationDate(at: repositoryURL) else { continue }
+
+            if localBoardModificationDates[board.id] == nil {
+                localBoardModificationDates[board.id] = modificationDate
+                continue
+            }
+
+            if localBoardModificationDates[board.id] != modificationDate {
+                refreshLocalBoardFromDisk(board.id, reportsErrors: false)
+            }
         }
     }
 
@@ -374,6 +428,43 @@ final class BoardStore: ObservableObject {
             bead.pullRequestNumber.map(String.init) ?? "",
             bead.title
         ].joined(separator: "|")
+    }
+
+    private static func preservingExistingBeadIDs(
+        in refreshedColumns: [BoardColumn],
+        from previousColumns: [BoardColumn]
+    ) -> [BoardColumn] {
+        let existingBeadsByKey = Dictionary(
+            previousColumns
+                .flatMap(\.beads)
+                .map { (localDiskRefreshKey(for: $0), $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+
+        return refreshedColumns.map { column in
+            var refreshedColumn = column
+            refreshedColumn.beads = refreshedColumn.beads.map { bead in
+                guard let existingBead = existingBeadsByKey[localDiskRefreshKey(for: bead)] else {
+                    return bead
+                }
+
+                var refreshedBead = bead
+                refreshedBead.id = existingBead.id
+                return refreshedBead
+            }
+            return refreshedColumn
+        }
+    }
+
+    private static func localDiskRefreshKey(for bead: Bead) -> String {
+        if let firstLine = bead.notes
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .first(where: { $0.hasPrefix("Beads ID: ") }) {
+            return firstLine
+        }
+
+        return [bead.title, bead.summary, bead.labels.joined(separator: ",")].joined(separator: "|")
     }
 
     private static func removingBundledSampleContent(from boards: [Board]) -> [Board] {
