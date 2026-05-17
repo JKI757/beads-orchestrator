@@ -71,6 +71,12 @@ func (c *Client) SuggestBeadFields(ctx context.Context, request BeadFieldSuggest
 	return response, err
 }
 
+func (c *Client) ReviewPlan(ctx context.Context, request BeadPlanReviewRequest) (BeadPlanReviewResponse, error) {
+	var response BeadPlanReviewResponse
+	err := c.post(ctx, "ai/plan-review", request, true, &response)
+	return response, err
+}
+
 func (c *Client) ReplaceBoards(ctx context.Context, boards []Board) error {
 	body, err := json.MarshalIndent(boards, "", "  ")
 	if err != nil {

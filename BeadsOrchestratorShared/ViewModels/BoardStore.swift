@@ -371,6 +371,16 @@ final class BoardStore: ObservableObject {
         )
     }
 
+    func reviewPlan(for beadID: Bead.ID, scope: BeadPlanReviewScope) async throws -> BeadPlanReviewResponse {
+        try await remoteClient.reviewPlan(
+            BeadPlanReviewRequest(
+                boardID: selectedBoardID,
+                beadID: beadID,
+                scope: scope
+            )
+        )
+    }
+
     func addImportedBeads(_ beads: [Bead], toColumnNamed columnName: String = "Ready") {
         guard let boardIndex = indexOfSelectedBoard, !beads.isEmpty else { return }
         let columnIndex = boards[boardIndex].columns.firstIndex { $0.name == columnName } ?? 0

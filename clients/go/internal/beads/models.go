@@ -105,3 +105,37 @@ type BeadFieldSuggestion struct {
 	Value     string `json:"value"`
 	Rationale string `json:"rationale"`
 }
+
+type BeadPlanReviewRequest struct {
+	BoardID *string `json:"boardID,omitempty"`
+	BeadID  string  `json:"beadID"`
+	Scope   string  `json:"scope"`
+}
+
+type BeadPlanReviewResponse struct {
+	Message     string                  `json:"message"`
+	Findings    []BeadPlanReviewFinding `json:"findings"`
+	Changes     []BeadPlanReviewChange  `json:"changes"`
+	GeneratedAt time.Time               `json:"generatedAt"`
+}
+
+type BeadPlanReviewFinding struct {
+	Severity string `json:"severity"`
+	Category string `json:"category"`
+	Title    string `json:"title"`
+	Detail   string `json:"detail"`
+}
+
+type BeadPlanReviewChange struct {
+	Kind          string   `json:"kind"`
+	TargetBeadsID *string  `json:"targetBeadsID,omitempty"`
+	Field         *string  `json:"field,omitempty"`
+	Value         *string  `json:"value,omitempty"`
+	Title         *string  `json:"title,omitempty"`
+	Summary       *string  `json:"summary,omitempty"`
+	Notes         *string  `json:"notes,omitempty"`
+	Labels        []string `json:"labels,omitempty"`
+	Priority      *string  `json:"priority,omitempty"`
+	IssueType     *string  `json:"issueType,omitempty"`
+	Rationale     string   `json:"rationale"`
+}

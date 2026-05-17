@@ -134,6 +134,291 @@ private struct RelationshipButton: View {
     }
 }
 
+private struct PlanReviewControls: View {
+    @EnvironmentObject private var store: BoardStore
+    #if os(macOS)
+    @EnvironmentObject private var server: BeadsHTTPServer
+    #endif
+
+    let bead: Bead
+    @State private var response: BeadPlanReviewResponse?
+    @State private var errorMessage: String?
+    @State private var reviewingScope: BeadPlanReviewScope?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Button {
+                    requestReview(scope: .bead)
+                } label: {
+                    Label("Review Bead", systemImage: "sparkles")
+                }
+                .disabled(reviewingScope != nil)
+
+                Button {
+                    requestReview(scope: .subtree)
+                } label: {
+                    Label("Review Subtree", systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                .disabled(reviewingScope != nil)
+            }
+            .controlSize(.small)
+
+            if let reviewingScope {
+                ProgressView("Reviewing \(reviewingScope.displayName.lowercased())")
+                    .controlSize(.small)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let response {
+                Text(response.message)
+                    .font(.callout.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !response.findings.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Findings")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(response.findings) { finding in
+                            PlanReviewFindingRow(finding: finding)
+                        }
+                    }
+                }
+
+                if !response.changes.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Proposed Changes")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(response.changes) { change in
+                            PlanReviewChangeRow(change: change) {
+                                apply(change)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func requestReview(scope: BeadPlanReviewScope) {
+        errorMessage = nil
+        reviewingScope = scope
+        Task {
+            do {
+                let reviewRequest = BeadPlanReviewRequest(boardID: store.selectedBoardID, beadID: bead.id, scope: scope)
+                let review: BeadPlanReviewResponse
+                #if os(macOS)
+                review = try await server.reviewPlan(request: reviewRequest)
+                #else
+                review = try await store.reviewPlan(for: bead.id, scope: scope)
+                #endif
+                response = review
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            reviewingScope = nil
+        }
+    }
+
+    private func apply(_ change: BeadPlanReviewChange) {
+        switch change.kind {
+        case .updateField:
+            guard
+                let field = change.field,
+                let target = targetBead(for: change),
+                let value = change.value
+            else { return }
+
+            var draft = BeadDraft(bead: target)
+            apply(field: field, value: value, to: &draft)
+            store.updateBead(target.id, with: draft)
+
+        case .createChildBead:
+            let parent = targetBead(for: change) ?? store.bead(beadsID: bead.relationshipID) ?? bead
+            var draft = BeadDraft()
+            draft.title = change.title?.nilIfBlank ?? "Untitled child bead"
+            draft.summary = change.summary ?? ""
+            draft.notes = change.notes ?? ""
+            draft.labelsText = change.labels?.joined(separator: ", ") ?? ""
+            draft.priority = change.priority ?? .normal
+            draft.issueType = change.issueType?.nilIfBlank
+            _ = store.createChildBead(parent: parent, draft: draft)
+
+        case .addDependency:
+            guard
+                let dependencyID = change.value?.nilIfBlank,
+                store.bead(beadsID: dependencyID) != nil,
+                let target = targetBead(for: change)
+            else { return }
+
+            var draft = BeadDraft(bead: target)
+            if !draft.dependencyBeadsIDs.contains(dependencyID) {
+                draft.dependencyBeadsIDs.append(dependencyID)
+                draft.dependencyBeadsIDs.sort()
+                draft.dependencyCount = draft.dependencyBeadsIDs.count
+                store.updateBead(target.id, with: draft)
+            }
+
+        case .setParent:
+            guard
+                let parentID = change.value?.nilIfBlank,
+                store.bead(beadsID: parentID) != nil,
+                let target = targetBead(for: change)
+            else { return }
+
+            var draft = BeadDraft(bead: target)
+            draft.parentBeadsID = parentID
+            store.updateBead(target.id, with: draft)
+        }
+    }
+
+    private func targetBead(for change: BeadPlanReviewChange) -> Bead? {
+        if let targetBeadsID = change.targetBeadsID?.nilIfBlank {
+            return store.bead(beadsID: targetBeadsID)
+        }
+        return store.bead(beadsID: bead.relationshipID) ?? bead
+    }
+
+    private func apply(field: BeadSuggestionField, value: String, to draft: inout BeadDraft) {
+        switch field {
+        case .title:
+            draft.title = value
+        case .summary:
+            draft.summary = value
+        case .notes:
+            draft.notes = value
+        case .labels:
+            draft.labelsText = value
+        case .priority:
+            if let priority = BeadPriority(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+                draft.priority = priority
+            }
+        case .issueType:
+            draft.issueType = value.nilIfBlank
+        case .parentBeadsID:
+            draft.parentBeadsID = value.nilIfBlank
+        case .dependencyBeadsIDs:
+            draft.dependencyBeadsIDs = value
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            draft.dependencyCount = draft.dependencyBeadsIDs.count
+        }
+    }
+}
+
+private struct PlanReviewFindingRow: View {
+    let finding: BeadPlanReviewFinding
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Label(finding.severity.rawValue.capitalized, systemImage: severityIcon)
+                    .foregroundStyle(severityColor)
+                Text(finding.category.displayName)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+
+            Text(finding.title)
+                .font(.callout.weight(.semibold))
+            Text(finding.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var severityIcon: String {
+        switch finding.severity {
+        case .info:
+            "info.circle"
+        case .warning:
+            "exclamationmark.triangle"
+        case .critical:
+            "exclamationmark.octagon"
+        }
+    }
+
+    private var severityColor: Color {
+        switch finding.severity {
+        case .info:
+            .secondary
+        case .warning:
+            .orange
+        case .critical:
+            .red
+        }
+    }
+}
+
+private struct PlanReviewChangeRow: View {
+    let change: BeadPlanReviewChange
+    let apply: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(change.kind.displayName, systemImage: icon)
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 8)
+                Button("Apply", action: apply)
+                    .controlSize(.small)
+            }
+
+            Text(primaryText)
+                .font(.callout.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(change.rationale)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var primaryText: String {
+        switch change.kind {
+        case .updateField:
+            "\(change.field?.displayName ?? "Field"): \(change.value ?? "")"
+        case .createChildBead:
+            change.title ?? "Create child bead"
+        case .addDependency:
+            "Depend on \(change.value ?? "selected bead")"
+        case .setParent:
+            "Set parent to \(change.value ?? "selected bead")"
+        }
+    }
+
+    private var icon: String {
+        switch change.kind {
+        case .updateField:
+            "square.and.pencil"
+        case .createChildBead:
+            "plus.square.on.square"
+        case .addDependency:
+            "link"
+        case .setParent:
+            "arrowshape.turn.up.left"
+        }
+    }
+}
+
 #if os(iOS)
 private struct FormBeadInspector: View {
     @EnvironmentObject private var store: BoardStore
@@ -188,6 +473,10 @@ private struct FormBeadInspector: View {
 
             Section("Relationships") {
                 RelationshipControls(bead: bead)
+            }
+
+            Section("AI Plan Review") {
+                PlanReviewControls(bead: bead)
             }
 
             WorkflowSection(bead: bead)
@@ -267,6 +556,10 @@ private struct TabletLandscapeBeadInspector: View {
                     RelationshipControls(bead: bead)
                 }
 
+                InspectorSection("AI Plan Review") {
+                    PlanReviewControls(bead: bead)
+                }
+
                 WorkflowSection(bead: bead)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -344,6 +637,13 @@ private struct InspectorRow: View {
 }
 #endif
 
+private extension String {
+    var nilIfBlank: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
 #if os(macOS)
 private struct MacBeadInspector: View {
     @EnvironmentObject private var store: BoardStore
@@ -418,6 +718,10 @@ private struct MacBeadInspector: View {
 
                 InspectorSection("Relationships") {
                     RelationshipControls(bead: bead)
+                }
+
+                InspectorSection("AI Plan Review") {
+                    PlanReviewControls(bead: bead)
                 }
 
                 InspectorSection("Workflow") {

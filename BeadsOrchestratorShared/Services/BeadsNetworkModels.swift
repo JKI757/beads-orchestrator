@@ -41,6 +41,137 @@ struct BeadFieldSuggestion: Codable, Equatable, Identifiable {
     }
 }
 
+struct BeadPlanReviewRequest: Codable, Equatable {
+    var boardID: Board.ID?
+    var beadID: Bead.ID
+    var scope: BeadPlanReviewScope
+}
+
+enum BeadPlanReviewScope: String, Codable, CaseIterable, Identifiable {
+    case bead
+    case subtree
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .bead:
+            "Bead"
+        case .subtree:
+            "Subtree"
+        }
+    }
+}
+
+struct BeadPlanReviewResponse: Codable, Equatable {
+    var message: String
+    var findings: [BeadPlanReviewFinding]
+    var changes: [BeadPlanReviewChange]
+    var generatedAt: Date
+}
+
+struct BeadPlanReviewFinding: Codable, Equatable, Identifiable {
+    var severity: BeadPlanReviewSeverity
+    var category: BeadPlanReviewCategory
+    var title: String
+    var detail: String
+
+    var id: String {
+        "\(severity.rawValue)|\(category.rawValue)|\(title)"
+    }
+}
+
+enum BeadPlanReviewSeverity: String, Codable, CaseIterable, Identifiable {
+    case info
+    case warning
+    case critical
+
+    var id: String {
+        rawValue
+    }
+}
+
+enum BeadPlanReviewCategory: String, Codable, CaseIterable, Identifiable {
+    case scope
+    case acceptanceCriteria
+    case dependencies
+    case sequencing
+    case risk
+    case decomposition
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .scope:
+            "Scope"
+        case .acceptanceCriteria:
+            "Acceptance Criteria"
+        case .dependencies:
+            "Dependencies"
+        case .sequencing:
+            "Sequencing"
+        case .risk:
+            "Risk"
+        case .decomposition:
+            "Decomposition"
+        }
+    }
+}
+
+struct BeadPlanReviewChange: Codable, Equatable, Identifiable {
+    var kind: BeadPlanReviewChangeKind
+    var targetBeadsID: String?
+    var field: BeadSuggestionField?
+    var value: String?
+    var title: String?
+    var summary: String?
+    var notes: String?
+    var labels: [String]?
+    var priority: BeadPriority?
+    var issueType: String?
+    var rationale: String
+
+    var id: String {
+        [
+            kind.rawValue,
+            targetBeadsID ?? "",
+            field?.rawValue ?? "",
+            value ?? "",
+            title ?? "",
+            rationale
+        ].joined(separator: "|")
+    }
+}
+
+enum BeadPlanReviewChangeKind: String, Codable, CaseIterable, Identifiable {
+    case updateField
+    case createChildBead
+    case addDependency
+    case setParent
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .updateField:
+            "Update Field"
+        case .createChildBead:
+            "Create Child"
+        case .addDependency:
+            "Add Dependency"
+        case .setParent:
+            "Set Parent"
+        }
+    }
+}
+
 enum BeadSuggestionField: String, Codable, CaseIterable, Identifiable {
     case title
     case summary
@@ -113,6 +244,7 @@ enum BeadsNetworkError: LocalizedError {
     case missingPairingToken
     case invalidResponse
     case httpStatus(Int)
+    case httpMessage(Int, String)
 
     var errorDescription: String? {
         switch self {
@@ -124,6 +256,8 @@ enum BeadsNetworkError: LocalizedError {
             "The server returned an invalid response."
         case let .httpStatus(status):
             "The server returned HTTP \(status)."
+        case let .httpMessage(status, message):
+            "The server returned HTTP \(status): \(message)"
         }
     }
 }

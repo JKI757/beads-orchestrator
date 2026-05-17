@@ -24,8 +24,8 @@ struct BeadsServerClient {
         try authorize(&request)
         request.httpBody = try BeadsJSON.encoder.encode(boards)
 
-        let (_, response) = try await session.data(for: request)
-        try validate(response)
+        let (data, response) = try await session.data(for: request)
+        try validate(data: data, response: response)
     }
 
     func llmStatus() async throws -> BeadsLLMStatus {
@@ -36,6 +36,10 @@ struct BeadsServerClient {
         try await post("ai/bead-suggestions", body: suggestionRequest, as: BeadFieldSuggestionResponse.self)
     }
 
+    func reviewPlan(_ reviewRequest: BeadPlanReviewRequest) async throws -> BeadPlanReviewResponse {
+        try await post("ai/plan-review", body: reviewRequest, as: BeadPlanReviewResponse.self)
+    }
+
     private func get<Value: Decodable>(_ path: String, as type: Value.Type, requiresAuth: Bool = true) async throws -> Value {
         var request = URLRequest(url: endpoint(path))
         if requiresAuth {
@@ -43,7 +47,7 @@ struct BeadsServerClient {
         }
 
         let (data, response) = try await session.data(for: request)
-        try validate(response)
+        try validate(data: data, response: response)
         return try BeadsJSON.decoder.decode(type, from: data)
     }
 
@@ -59,7 +63,7 @@ struct BeadsServerClient {
         request.httpBody = try BeadsJSON.encoder.encode(body)
 
         let (data, response) = try await session.data(for: request)
-        try validate(response)
+        try validate(data: data, response: response)
         return try BeadsJSON.decoder.decode(type, from: data)
     }
 
@@ -75,11 +79,16 @@ struct BeadsServerClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
-    private func validate(_ response: URLResponse) throws {
+    private func validate(data: Data, response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw BeadsNetworkError.invalidResponse
         }
         guard 200..<300 ~= httpResponse.statusCode else {
+            let message = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !message.isEmpty {
+                throw BeadsNetworkError.httpMessage(httpResponse.statusCode, message)
+            }
             throw BeadsNetworkError.httpStatus(httpResponse.statusCode)
         }
     }

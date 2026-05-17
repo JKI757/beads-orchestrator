@@ -208,6 +208,14 @@ final class BeadsHTTPServer: ObservableObject {
                 let response = try await suggestBeadFields(request: request, store: store)
                 return try jsonResponse(response)
 
+            case ("POST", "/ai/plan-review"):
+                guard isAuthorized(request) else {
+                    return httpResponse(status: 401, body: Data())
+                }
+                let request = try BeadsJSON.decoder.decode(BeadPlanReviewRequest.self, from: request.body)
+                let response = try await reviewPlan(request: request, store: store)
+                return try jsonResponse(response)
+
             case ("PUT", "/boards"):
                 guard isAuthorized(request) else {
                     return httpResponse(status: 401, body: Data())
@@ -229,6 +237,13 @@ final class BeadsHTTPServer: ObservableObject {
             throw LLMProviderError.unavailable("No board store is attached to the server.")
         }
         return try await suggestBeadFields(request: request, store: store)
+    }
+
+    func reviewPlan(request: BeadPlanReviewRequest) async throws -> BeadPlanReviewResponse {
+        guard let store else {
+            throw LLMProviderError.unavailable("No board store is attached to the server.")
+        }
+        return try await reviewPlan(request: request, store: store)
     }
 
     private func suggestBeadFields(
@@ -261,6 +276,41 @@ final class BeadsHTTPServer: ObservableObject {
             )
         } catch {
             llmConfiguration.recordProviderFailure("The provider returned suggestions in an unreadable format.")
+            throw LLMProviderError.invalidResponse
+        }
+    }
+
+    private func reviewPlan(
+        request: BeadPlanReviewRequest,
+        store: BoardStore
+    ) async throws -> BeadPlanReviewResponse {
+        let status = llmConfiguration.status
+        guard status.isAvailable else {
+            throw LLMProviderError.unavailable(status.message)
+        }
+
+        let configuration = llmConfiguration.configuration
+        guard let endpointURL = configuration.endpointURL else {
+            throw LLMProviderError.unavailable("The LLM endpoint URL is invalid.")
+        }
+
+        let prompt = try planReviewPrompt(request: request, store: store)
+        let llmResponse = try await requestLLMJSON(
+            endpointURL: endpointURL.appending(path: "chat/completions"),
+            configuration: configuration,
+            userPrompt: prompt
+        )
+
+        do {
+            let payload = try BeadsJSON.decoder.decode(LLMPlanReviewPayload.self, from: llmResponse)
+            return BeadPlanReviewResponse(
+                message: payload.message,
+                findings: payload.findings,
+                changes: payload.changes,
+                generatedAt: Date()
+            )
+        } catch {
+            llmConfiguration.recordProviderFailure("The provider returned a plan review in an unreadable format.")
             throw LLMProviderError.invalidResponse
         }
     }
@@ -377,6 +427,116 @@ final class BeadsHTTPServer: ObservableObject {
         """
     }
 
+    private func planReviewPrompt(request: BeadPlanReviewRequest, store: BoardStore) throws -> String {
+        let board = request.boardID.flatMap { boardID in
+            store.boards.first { $0.id == boardID }
+        } ?? store.selectedBoard
+        guard let board else {
+            throw LLMProviderError.unavailable("No board context is available.")
+        }
+        guard let root = board.columns.flatMap(\.beads).first(where: { $0.id == request.beadID }) else {
+            throw LLMProviderError.unavailable("The selected bead no longer exists.")
+        }
+
+        let reviewBeads = reviewBeads(root: root, board: board, scope: request.scope)
+        let statusByBeadID = Dictionary(
+            uniqueKeysWithValues: board.columns.flatMap { column in
+                column.beads.map { bead in (bead.id, bead.status ?? column.name) }
+            }
+        )
+        let context = reviewBeads.map { bead in
+            """
+            id=\(bead.relationshipID)
+            title=\(bead.title)
+            type=\(bead.issueType ?? bead.sourceType.displayName)
+            status=\(statusByBeadID[bead.id] ?? "Unknown")
+            priority=\(bead.priority.rawValue)
+            parent=\(bead.parentBeadsID ?? "none")
+            children=\(bead.childBeadsIDs.joined(separator: ", "))
+            dependencies=\(bead.dependencyBeadsIDs.joined(separator: ", "))
+            summary=\(bead.summary)
+            notes=\(bead.notes)
+            """
+        }.joined(separator: "\n---\n")
+
+        let boardIDs = board.columns
+            .flatMap(\.beads)
+            .filter { !$0.isArchived }
+            .map { "\($0.relationshipID): \($0.title)" }
+            .joined(separator: "\n")
+
+        return """
+        Review this software project plan like a senior AI project manager. Find missing steps, unclear acceptance criteria, unrealistic scope, dependency mistakes, sequencing risks, and places where the work should be decomposed.
+
+        Return JSON with exactly this shape:
+        {
+          "message": "short review summary",
+          "findings": [
+            {
+              "severity": "info|warning|critical",
+              "category": "scope|acceptanceCriteria|dependencies|sequencing|risk|decomposition",
+              "title": "short finding",
+              "detail": "specific, actionable detail"
+            }
+          ],
+          "changes": [
+            {
+              "kind": "updateField|createChildBead|addDependency|setParent",
+              "targetBeadsID": "existing bead id or null",
+              "field": "summary|notes|labels|priority|issueType|parentBeadsID|dependencyBeadsIDs|title or null",
+              "value": "new field value, dependency id, or parent id when relevant",
+              "title": "child title when creating a child bead",
+              "summary": "child or replacement summary",
+              "notes": "acceptance criteria and implementation guidance",
+              "labels": ["label"],
+              "priority": "low|normal|high|urgent or null",
+              "issueType": "task|bug|feature|epic|chore|research or null",
+              "rationale": "why this change improves execution"
+            }
+          ]
+        }
+
+        Use updateField for improvements to the selected bead or an included subtree bead. Use createChildBead for missing child work that should remain independently movable. Use addDependency or setParent only when the referenced ID appears in Available bead IDs. Do not invent external IDs. Keep changes reviewable and small.
+
+        Board: \(board.name)
+        Repository: \(board.repositoryName)
+        Columns: \(board.columns.map(\.name).joined(separator: ", "))
+        Review scope: \(request.scope.rawValue)
+        Root bead ID: \(root.relationshipID)
+
+        Available bead IDs:
+        \(boardIDs)
+
+        Reviewed plan:
+        \(context)
+        """
+    }
+
+    private func reviewBeads(root: Bead, board: Board, scope: BeadPlanReviewScope) -> [Bead] {
+        guard scope == .subtree else { return [root] }
+
+        let beadsByRelationshipID = Dictionary(
+            board.columns.flatMap(\.beads).map { ($0.relationshipID, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+        var result: [Bead] = []
+        var visited: Set<String> = []
+
+        func visit(_ bead: Bead) {
+            guard !visited.contains(bead.relationshipID) else { return }
+            visited.insert(bead.relationshipID)
+            result.append(bead)
+            for childID in bead.childBeadsIDs {
+                if let child = beadsByRelationshipID[childID] {
+                    visit(child)
+                }
+            }
+        }
+
+        visit(root)
+        return result
+    }
+
     private func stripJSONCodeFence(from content: String) -> String {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("```") else { return trimmed }
@@ -406,7 +566,7 @@ final class BeadsHTTPServer: ObservableObject {
                 "board-snapshot-replace",
                 "beads-relationship-metadata",
                 "server-side-llm-status"
-            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance", "ai-bead-field-suggestions"] : []),
+            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance", "ai-bead-field-suggestions", "ai-plan-review"] : []),
             llmStatus: llmConfiguration.status
         )
     }
@@ -453,6 +613,12 @@ final class BeadsHTTPServer: ObservableObject {
 private struct LLMBeadSuggestionPayload: Decodable {
     var message: String
     var suggestions: [BeadFieldSuggestion]
+}
+
+private struct LLMPlanReviewPayload: Decodable {
+    var message: String
+    var findings: [BeadPlanReviewFinding]
+    var changes: [BeadPlanReviewChange]
 }
 
 private struct OpenAIChatRequest: Encodable {
