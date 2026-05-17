@@ -1344,12 +1344,20 @@ private struct AIPMChangeSummary: View {
         switch change.kind {
         case .updateField:
             "\(change.field?.displayName ?? "Field"): \(change.value ?? "")"
+        case .createBead:
+            change.title ?? "Create bead"
         case .createChildBead:
             change.title ?? "Create child bead"
         case .addDependency:
             "Depend on \(change.value ?? "selected bead")"
         case .setParent:
             "Set parent to \(change.value ?? "selected bead")"
+        case .setStatus:
+            "Set status to \(change.value ?? "selected status")"
+        case .setBlocked:
+            boolText("Blocked", value: change.value, defaultValue: true)
+        case .setStale:
+            boolText("Stale", value: change.value, defaultValue: true)
         }
     }
 
@@ -1357,13 +1365,27 @@ private struct AIPMChangeSummary: View {
         switch change.kind {
         case .updateField:
             "square.and.pencil"
+        case .createBead:
+            "plus.square"
         case .createChildBead:
             "plus.square.on.square"
         case .addDependency:
             "link"
         case .setParent:
             "arrowshape.turn.up.left"
+        case .setStatus:
+            "arrow.left.arrow.right"
+        case .setBlocked:
+            "exclamationmark.octagon"
+        case .setStale:
+            "clock.badge.exclamationmark"
         }
+    }
+
+    private func boolText(_ label: String, value: String?, defaultValue: Bool) -> String {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isOn = normalized.map { !["false", "no", "0", "unblocked", "active"].contains($0) } ?? defaultValue
+        return "\(isOn ? "Mark" : "Clear") \(label)"
     }
 }
 
@@ -2227,11 +2249,30 @@ struct BeadEditorSheet: View {
             }
         case .issueType:
             draft.issueType = suggestion.value.nilIfBlank
+        case .status:
+            draft.status = suggestion.value.nilIfBlank
+        case .isBlocked:
+            draft.isBlocked = boolValue(from: suggestion.value, defaultValue: true)
+        case .isStale:
+            draft.isStale = boolValue(from: suggestion.value, defaultValue: true)
         case .parentBeadsID:
             draft.parentBeadsID = suggestion.value.nilIfBlank
         case .dependencyBeadsIDs:
             draft.dependencyBeadsIDs = parsedCommaList(suggestion.value)
             draft.dependencyCount = draft.dependencyBeadsIDs.count
+        }
+    }
+
+    private func boolValue(from value: String, defaultValue: Bool) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return defaultValue }
+        switch normalized {
+        case "true", "yes", "1", "blocked", "stale":
+            return true
+        case "false", "no", "0", "unblocked", "active":
+            return false
+        default:
+            return defaultValue
         }
     }
 

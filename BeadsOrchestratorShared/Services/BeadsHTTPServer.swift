@@ -594,14 +594,14 @@ final class BeadsHTTPServer: ObservableObject {
           "message": "short status message",
           "suggestions": [
             {
-              "field": "summary|notes|labels|priority|issueType|parentBeadsID|dependencyBeadsIDs|title",
+              "field": "summary|notes|labels|priority|issueType|status|isBlocked|isStale|parentBeadsID|dependencyBeadsIDs|title",
               "value": "field value as plain text; labels and dependency IDs are comma-separated",
               "rationale": "why this helps"
             }
           ]
         }
 
-        Use "notes" for acceptance criteria and implementation guidance. Use "parentBeadsID" and "dependencyBeadsIDs" only when the ID exists in board context. Priority must be one of low, normal, high, urgent. Issue type should be a concise category such as task, bug, feature, epic, chore, or research.
+        Use "notes" for acceptance criteria and implementation guidance. Use "parentBeadsID" and "dependencyBeadsIDs" only when the ID exists in board context. Use "status", "isBlocked", and "isStale" only when they clarify current PM state. Priority must be one of low, normal, high, urgent. Issue type should be a concise category such as task, bug, feature, epic, chore, or research.
 
         Current draft:
         Title: \(draft.title)
@@ -671,12 +671,12 @@ final class BeadsHTTPServer: ObservableObject {
           ],
           "changes": [
             {
-              "kind": "updateField|createChildBead|addDependency|setParent",
+              "kind": "updateField|createBead|createChildBead|addDependency|setParent|setStatus|setBlocked|setStale",
               "targetBeadsID": "existing bead id or null",
-              "field": "summary|notes|labels|priority|issueType|parentBeadsID|dependencyBeadsIDs|title or null",
-              "value": "new field value, dependency id, or parent id when relevant",
-              "title": "child title when creating a child bead",
-              "summary": "child or replacement summary",
+              "field": "summary|notes|labels|priority|issueType|status|isBlocked|isStale|parentBeadsID|dependencyBeadsIDs|title or null",
+              "value": "new field value, dependency id, parent id, status, or true/false when relevant",
+              "title": "bead title when creating a bead",
+              "summary": "bead or replacement summary",
               "notes": "acceptance criteria and implementation guidance",
               "labels": ["label"],
               "priority": "low|normal|high|urgent or null",
@@ -686,7 +686,7 @@ final class BeadsHTTPServer: ObservableObject {
           ]
         }
 
-        Use updateField for improvements to the selected bead or an included subtree bead. Use createChildBead for missing child work that should remain independently movable. Use addDependency or setParent only when the referenced ID appears in Available bead IDs. Do not invent external IDs. Keep changes reviewable and small.
+        Use updateField for improvements to the selected bead or an included subtree bead. Use createBead for missing top-level work and createChildBead for missing child work that should remain independently movable. Use setStatus, setBlocked, and setStale for explicit PM state changes. Use addDependency or setParent only when the referenced ID appears in Available bead IDs. Do not invent external IDs. Keep changes reviewable and small.
 
         Board: \(board.name)
         Repository: \(board.repositoryName)
@@ -843,12 +843,12 @@ final class BeadsHTTPServer: ObservableObject {
               "rationale": "why this matters now",
               "changes": [
                 {
-                  "kind": "updateField|createChildBead|addDependency|setParent",
+                  "kind": "updateField|createBead|createChildBead|addDependency|setParent|setStatus|setBlocked|setStale",
                   "targetBeadsID": "existing bead id or null",
-                  "field": "summary|notes|labels|priority|issueType|parentBeadsID|dependencyBeadsIDs|title or null",
-                  "value": "field value, dependency id, or parent id when relevant",
-                  "title": "child title when creating a child bead",
-                  "summary": "child or replacement summary",
+                  "field": "summary|notes|labels|priority|issueType|status|isBlocked|isStale|parentBeadsID|dependencyBeadsIDs|title or null",
+                  "value": "field value, dependency id, parent id, status, or true/false when relevant",
+                  "title": "bead title when creating a bead",
+                  "summary": "bead or replacement summary",
                   "notes": "acceptance criteria and implementation guidance",
                   "labels": ["label"],
                   "priority": "low|normal|high|urgent or null",
@@ -866,6 +866,8 @@ final class BeadsHTTPServer: ObservableObject {
             ]
           }
         }
+
+        Use createBead for missing top-level work, createChildBead for work under a known parent, updateField for text and metadata corrections, setStatus for moving work between board phases, setBlocked for blocker state, and setStale for stale/active state. Use addDependency or setParent only when the referenced ID appears in the board context. Keep each proposed action independently reviewable.
 
         Settings:
         cadence=\(settings.cadence.rawValue)

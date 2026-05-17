@@ -301,6 +301,26 @@ final class BoardStore: ObservableObject {
             updateBead(target.id, with: draft)
             return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated \(target.title).")
 
+        case .createBead:
+            var draft = BeadDraft()
+            draft.title = change.title?.nilIfBlank ?? "Untitled bead"
+            draft.summary = change.summary ?? ""
+            draft.notes = change.notes ?? ""
+            draft.labelsText = change.labels?.joined(separator: ", ") ?? ""
+            draft.priority = change.priority ?? .normal
+            draft.issueType = change.issueType?.nilIfBlank
+            draft.status = change.value?.nilIfBlank
+            let targetColumnID: BoardColumn.ID?
+            if let status = change.value {
+                targetColumnID = columnID(forStatus: status)
+            } else {
+                targetColumnID = nil
+            }
+            guard let bead = createBead(in: targetColumnID, draft: draft) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Could not create bead.")
+            }
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Created \(bead.title).")
+
         case .createChildBead:
             guard let parent = targetBead(for: change, fallbackBead: fallbackBead) else {
                 return BeadChangeApplicationResult(change: change, status: .failed, message: "Parent bead was not found.")
@@ -354,6 +374,42 @@ final class BoardStore: ObservableObject {
             draft.parentBeadsID = parentID
             updateBead(target.id, with: draft)
             return BeadChangeApplicationResult(change: change, status: .applied, message: "Set parent for \(target.title).")
+
+        case .setStatus:
+            guard let status = change.value?.nilIfBlank else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Missing status.")
+            }
+            guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Target bead was not found.")
+            }
+
+            var draft = BeadDraft(bead: target)
+            draft.status = status
+            updateBead(target.id, with: draft)
+            if let columnID = columnID(forStatus: status) {
+                moveBead(target.id, to: columnID)
+            }
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Set status for \(target.title).")
+
+        case .setBlocked:
+            guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Target bead was not found.")
+            }
+
+            var draft = BeadDraft(bead: target)
+            draft.isBlocked = boolValue(from: change.value, defaultValue: true)
+            updateBead(target.id, with: draft)
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated blocked state for \(target.title).")
+
+        case .setStale:
+            guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
+                return BeadChangeApplicationResult(change: change, status: .failed, message: "Target bead was not found.")
+            }
+
+            var draft = BeadDraft(bead: target)
+            draft.isStale = boolValue(from: change.value, defaultValue: true)
+            updateBead(target.id, with: draft)
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated stale state for \(target.title).")
         }
     }
 
@@ -642,6 +698,12 @@ final class BoardStore: ObservableObject {
             }
         case .issueType:
             draft.issueType = value.nilIfBlank
+        case .status:
+            draft.status = value.nilIfBlank
+        case .isBlocked:
+            draft.isBlocked = boolValue(from: value, defaultValue: true)
+        case .isStale:
+            draft.isStale = boolValue(from: value, defaultValue: true)
         case .parentBeadsID:
             draft.parentBeadsID = value.nilIfBlank
         case .dependencyBeadsIDs:
@@ -650,6 +712,28 @@ final class BoardStore: ObservableObject {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             draft.dependencyCount = draft.dependencyBeadsIDs.count
+        }
+    }
+
+    private func columnID(forStatus status: String) -> BoardColumn.ID? {
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return selectedBoard?.columns.first { column in
+            column.name.caseInsensitiveCompare(normalized) == .orderedSame
+        }?.id
+    }
+
+    private func boolValue(from value: String?, defaultValue: Bool) -> Bool {
+        guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !normalized.isEmpty else {
+            return defaultValue
+        }
+        switch normalized {
+        case "true", "yes", "1", "blocked", "stale":
+            return true
+        case "false", "no", "0", "unblocked", "active":
+            return false
+        default:
+            return defaultValue
         }
     }
 

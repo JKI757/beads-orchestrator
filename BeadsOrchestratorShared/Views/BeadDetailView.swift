@@ -314,12 +314,20 @@ private struct PlanReviewChangeRow: View {
         switch change.kind {
         case .updateField:
             "\(change.field?.displayName ?? "Field"): \(change.value ?? "")"
+        case .createBead:
+            change.title ?? "Create bead"
         case .createChildBead:
             change.title ?? "Create child bead"
         case .addDependency:
             "Depend on \(change.value ?? "selected bead")"
         case .setParent:
             "Set parent to \(change.value ?? "selected bead")"
+        case .setStatus:
+            "Set status to \(change.value ?? "selected status")"
+        case .setBlocked:
+            boolText("Blocked", value: change.value, defaultValue: true)
+        case .setStale:
+            boolText("Stale", value: change.value, defaultValue: true)
         }
     }
 
@@ -327,13 +335,27 @@ private struct PlanReviewChangeRow: View {
         switch change.kind {
         case .updateField:
             "square.and.pencil"
+        case .createBead:
+            "plus.square"
         case .createChildBead:
             "plus.square.on.square"
         case .addDependency:
             "link"
         case .setParent:
             "arrowshape.turn.up.left"
+        case .setStatus:
+            "arrow.left.arrow.right"
+        case .setBlocked:
+            "exclamationmark.octagon"
+        case .setStale:
+            "clock.badge.exclamationmark"
         }
+    }
+
+    private func boolText(_ label: String, value: String?, defaultValue: Bool) -> String {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isOn = normalized.map { !["false", "no", "0", "unblocked", "active"].contains($0) } ?? defaultValue
+        return "\(isOn ? "Mark" : "Clear") \(label)"
     }
 }
 

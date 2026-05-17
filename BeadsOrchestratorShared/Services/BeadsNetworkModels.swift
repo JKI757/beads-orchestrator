@@ -150,9 +150,13 @@ struct BeadPlanReviewChange: Codable, Equatable, Identifiable {
 
 enum BeadPlanReviewChangeKind: String, Codable, CaseIterable, Identifiable {
     case updateField
+    case createBead
     case createChildBead
     case addDependency
     case setParent
+    case setStatus
+    case setBlocked
+    case setStale
 
     var id: String {
         rawValue
@@ -162,12 +166,20 @@ enum BeadPlanReviewChangeKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .updateField:
             "Update Field"
+        case .createBead:
+            "Create Bead"
         case .createChildBead:
             "Create Child"
         case .addDependency:
             "Add Dependency"
         case .setParent:
             "Set Parent"
+        case .setStatus:
+            "Set Status"
+        case .setBlocked:
+            "Set Blocked"
+        case .setStale:
+            "Set Stale"
         }
     }
 }
@@ -499,6 +511,9 @@ enum BeadSuggestionField: String, Codable, CaseIterable, Identifiable {
     case labels
     case priority
     case issueType
+    case status
+    case isBlocked
+    case isStale
     case parentBeadsID
     case dependencyBeadsIDs
 
@@ -520,6 +535,12 @@ enum BeadSuggestionField: String, Codable, CaseIterable, Identifiable {
             "Priority"
         case .issueType:
             "Issue Type"
+        case .status:
+            "Status"
+        case .isBlocked:
+            "Blocked"
+        case .isStale:
+            "Stale"
         case .parentBeadsID:
             "Parent"
         case .dependencyBeadsIDs:
