@@ -392,11 +392,14 @@ private struct CompactRootView: View {
                     ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create a board to start tracking beads."))
                 }
             }
-            .navigationTitle("Board")
+            .navigationTitle(store.selectedBoard?.name ?? "Boards")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    BoardMenuButton(showingNewBoard: $showingNewBoard, showingImportBoard: $showingImportBoard)
+                    CompactBoardSwitcherButton(
+                        showingNewBoard: $showingNewBoard,
+                        showingImportBoard: $showingImportBoard
+                    )
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -437,6 +440,40 @@ private struct CompactRootView: View {
             Task {
                 await store.pullFromRemoteServerIfPaired()
             }
+        }
+    }
+}
+
+private struct CompactBoardSwitcherButton: View {
+    @EnvironmentObject private var store: BoardStore
+    @Binding var showingNewBoard: Bool
+    @Binding var showingImportBoard: Bool
+
+    var body: some View {
+        Menu {
+            if store.activeBoards.isEmpty {
+                Text("No Boards")
+            } else {
+                ForEach(store.activeBoards) { board in
+                    Button {
+                        store.select(board)
+                    } label: {
+                        Label(board.name, systemImage: board.id == store.selectedBoardID ? "checkmark.circle.fill" : "rectangle")
+                    }
+                }
+
+                Divider()
+            }
+
+            Button("New Empty Board") {
+                showingNewBoard = true
+            }
+
+            Button("Import Existing Beads Project") {
+                showingImportBoard = true
+            }
+        } label: {
+            Label("Boards", systemImage: "rectangle.stack")
         }
     }
 }

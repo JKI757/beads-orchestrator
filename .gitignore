@@ -13,6 +13,7 @@ xcuserdata/
 DerivedData/
 build/
 Build/
+bin/
 *.ipa
 *.dSYM
 *.dSYM.zip
@@ -34,6 +35,10 @@ playground.xcworkspace/
 *.swo
 .env
 .env.*
+
+# Go client local outputs
+clients/go/bin/
+clients/go/dist/
 
 # Generated local screenshots from simulator and macOS review passes
 Beads-Orchestrator-*.png

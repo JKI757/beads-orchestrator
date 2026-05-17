@@ -48,6 +48,7 @@ The app is organized around one Xcode project:
 - `BeadsOrchestratorShared/ViewModels`: board state, persistence, selection, and sync orchestration.
 - `BeadsOrchestratorShared/Views`: reusable SwiftUI board, card, sidebar, detail, and connection UI.
 - `BeadsOrchestratorShared/Services`: local Git/GitHub source boundaries plus Mac server/client networking.
+- `clients/go`: cross-platform Go clients kept outside the Xcode project, including a Fyne UI and CLI.
 - `docs`: product and implementation planning notes.
 - `.beads`: beads issue-tracking data for project tasking.
 
@@ -102,6 +103,20 @@ Verified CLI builds:
 xcodebuild -project Beads-Orchestrator.xcodeproj -scheme "Beads-Orchestrator macOS" -configuration Debug -destination 'platform=macOS' build
 xcodebuild -project Beads-Orchestrator.xcodeproj -scheme "Beads-Orchestrator iOS" -configuration Debug -destination 'generic/platform=iOS Simulator' build
 ```
+
+## Go Clients
+
+The repository also includes standalone Go clients under `clients/go`. They are not referenced by `Beads-Orchestrator.xcodeproj`, so Xcode ignores them.
+
+```sh
+cd clients/go
+make all
+```
+
+This builds:
+
+- `bin/beads-ui`: Fyne desktop UI for the Mac server.
+- `bin/beadsctl`: CLI for health checks, board listing, snapshot import/export, and simple bead mutations.
 
 ## Pairing A Mobile Client
 
