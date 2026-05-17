@@ -14,6 +14,8 @@ final class BoardStore: ObservableObject {
     @Published var remoteConfiguration = BeadsRemoteConfiguration(serverURLString: "")
     @Published var remoteStatusMessage = "Not connected"
     @Published var remoteServerInfo: BeadsServerInfo?
+    @Published var remoteAIPMState: AIPMState?
+    @Published var remoteAIPMStatusMessage = "Not loaded"
     @Published var localRefreshStatusMessage: String?
 
     private let persistenceURL: URL
@@ -393,7 +395,9 @@ final class BoardStore: ObservableObject {
     func saveRemoteConfiguration(_ configuration: BeadsRemoteConfiguration) {
         remoteConfiguration = configuration
         remoteServerInfo = nil
+        remoteAIPMState = nil
         remoteStatusMessage = "Not connected"
+        remoteAIPMStatusMessage = "Not loaded"
         Self.persistRemoteConfiguration(configuration)
     }
 
@@ -404,6 +408,9 @@ final class BoardStore: ObservableObject {
                 : try await remoteClient.health()
             remoteServerInfo = info
             remoteStatusMessage = remoteConfiguration.isPaired ? "Paired with \(info.name)" : "Server reachable; pairing required"
+            if remoteConfiguration.isPaired {
+                await fetchRemoteAIPMState()
+            }
         } catch {
             remoteServerInfo = nil
             remoteStatusMessage = error.localizedDescription
@@ -416,6 +423,7 @@ final class BoardStore: ObservableObject {
             replaceBoards(boards)
             remoteServerInfo = try? await remoteClient.health()
             remoteStatusMessage = "Downloaded \(boards.count) boards from Mac"
+            await fetchRemoteAIPMState()
         } catch {
             remoteStatusMessage = error.localizedDescription
         }
@@ -433,6 +441,34 @@ final class BoardStore: ObservableObject {
             remoteStatusMessage = "Overwrote Mac with \(boards.count) local boards"
         } catch {
             remoteStatusMessage = error.localizedDescription
+        }
+    }
+
+    func fetchRemoteAIPMState() async {
+        guard remoteConfiguration.isPaired else {
+            remoteAIPMStatusMessage = "Pair with the Mac server first."
+            return
+        }
+
+        do {
+            remoteAIPMState = try await remoteClient.aiPMState()
+            remoteAIPMStatusMessage = "AI PM updated"
+        } catch {
+            remoteAIPMStatusMessage = error.localizedDescription
+        }
+    }
+
+    func runRemoteAIPM() async {
+        guard remoteConfiguration.isPaired else {
+            remoteAIPMStatusMessage = "Pair with the Mac server first."
+            return
+        }
+
+        do {
+            remoteAIPMState = try await remoteClient.runAIPM(AIPMRunRequest(boardID: selectedBoardID))
+            remoteAIPMStatusMessage = "AI PM run complete"
+        } catch {
+            remoteAIPMStatusMessage = error.localizedDescription
         }
     }
 

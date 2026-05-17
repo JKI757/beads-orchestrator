@@ -782,6 +782,7 @@ private struct ConnectionSettingsSheet: View {
     @State private var pairingToken = ""
     #if os(iOS)
     @State private var showingScanner = false
+    @State private var showingAIPMDashboard = false
     #endif
 
     var body: some View {
@@ -820,6 +821,28 @@ private struct ConnectionSettingsSheet: View {
                         }
                     }
                 }
+
+                #if os(iOS)
+                if store.remoteConfiguration.isPaired {
+                    Section("AI PM") {
+                        Button {
+                            showingAIPMDashboard = true
+                        } label: {
+                            Label("Open AI PM", systemImage: "sparkles")
+                        }
+
+                        Button {
+                            save()
+                            Task { await store.fetchRemoteAIPMState() }
+                        } label: {
+                            Label("Refresh AI PM", systemImage: "arrow.clockwise")
+                        }
+
+                        Text(store.remoteAIPMStatusMessage)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                #endif
 
                 Section {
                     #if os(iOS)
@@ -875,6 +898,10 @@ private struct ConnectionSettingsSheet: View {
                 applyPairingPayload(payloadString)
                 showingScanner = false
             }
+        }
+        .sheet(isPresented: $showingAIPMDashboard) {
+            RemoteAIPMDashboardSheet()
+                .environmentObject(store)
         }
         #endif
     }
@@ -1545,6 +1572,176 @@ private final class QRScannerViewController: UIViewController, AVCaptureMetadata
             label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
+    }
+}
+
+private struct RemoteAIPMDashboardSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: BoardStore
+    @State private var isRunning = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Status") {
+                    Text(store.remoteAIPMStatusMessage)
+                        .foregroundStyle(.secondary)
+
+                    if let state = store.remoteAIPMState {
+                        LabeledContent("Last run", value: lastRunText(for: state))
+                        LabeledContent("Pending decisions", value: "\(state.pendingProposals.count)")
+                        LabeledContent("Cadence", value: state.settings.cadence.displayName)
+                        LabeledContent("Autonomy", value: state.settings.autonomyLevel.displayName)
+                        if let summary = state.lastRunSummary, !summary.isEmpty {
+                            Text(summary)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        Task { await refresh() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+
+                    Button {
+                        Task { await runPM() }
+                    } label: {
+                        Label("Run AI PM", systemImage: "play.circle")
+                    }
+                    .disabled(isRunning)
+
+                    if isRunning {
+                        ProgressView()
+                    }
+                }
+
+                Section("Pending Decisions") {
+                    if let state = store.remoteAIPMState, !state.pendingProposals.isEmpty {
+                        ForEach(state.pendingProposals) { proposal in
+                            RemoteAIPMProposalRow(proposal: proposal)
+                        }
+                    } else {
+                        Text("No pending decisions.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Recent Reports") {
+                    if let state = store.remoteAIPMState, !state.reports.isEmpty {
+                        ForEach(state.reports.prefix(5)) { report in
+                            RemoteAIPMReportRow(report: report)
+                        }
+                    } else {
+                        Text("No reports generated yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("AI PM")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .task {
+            await refresh()
+        }
+    }
+
+    private func refresh() async {
+        await store.fetchRemoteAIPMState()
+    }
+
+    private func runPM() async {
+        isRunning = true
+        defer { isRunning = false }
+        await store.runRemoteAIPM()
+    }
+
+    private func lastRunText(for state: AIPMState) -> String {
+        guard let date = state.lastRunAt else { return "Never" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+private struct RemoteAIPMProposalRow: View {
+    let proposal: AIPMDecisionProposal
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(proposal.title)
+                    .font(.headline)
+                Spacer()
+                Text(proposal.category.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(proposal.risk.rawValue.capitalized)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(riskColor)
+            }
+
+            Text(proposal.summary)
+                .foregroundStyle(.secondary)
+            Text(proposal.rationale)
+                .font(.callout)
+
+            if !proposal.changes.isEmpty {
+                Text("\(proposal.changes.count) proposed change\(proposal.changes.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var riskColor: Color {
+        switch proposal.risk {
+        case .low:
+            .secondary
+        case .medium:
+            .orange
+        case .high:
+            .red
+        }
+    }
+}
+
+private struct RemoteAIPMReportRow: View {
+    let report: AIPMReportSnapshot
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(report.summary)
+                    .foregroundStyle(.secondary)
+
+                ForEach(report.sections) { section in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(section.title)
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(section.items, id: \.self) { item in
+                            Text(item)
+                                .font(.callout)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(report.title)
+                Text(report.generatedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 #endif
