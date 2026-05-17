@@ -49,6 +49,8 @@ struct RootView: View {
                     BoardView(board: board, presentation: .mac)
                 case .hierarchy:
                     HierarchyView(board: board, presentation: .mac)
+                case .aiPM:
+                    AIPMWorkspaceView(pmState: server.aiPMState)
                 }
             } else {
                 ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
@@ -228,6 +230,7 @@ struct RootView: View {
 private enum WorkspaceMode: String, CaseIterable, Identifiable {
     case board
     case hierarchy
+    case aiPM
 
     var id: String {
         rawValue
@@ -237,6 +240,7 @@ private enum WorkspaceMode: String, CaseIterable, Identifiable {
         switch self {
         case .board: "Board"
         case .hierarchy: "Hierarchy"
+        case .aiPM: "AI PM"
         }
     }
 
@@ -244,6 +248,7 @@ private enum WorkspaceMode: String, CaseIterable, Identifiable {
         switch self {
         case .board: "rectangle.3.group"
         case .hierarchy: "list.bullet.indent"
+        case .aiPM: "sparkles"
         }
     }
 }
@@ -258,7 +263,7 @@ private struct WorkspaceModePicker: View {
             }
         }
         .pickerStyle(.segmented)
-        .frame(width: 188)
+        .frame(width: 258)
     }
 }
 
@@ -366,6 +371,8 @@ private struct TabletPortraitWorkspace: View {
                     BoardView(board: board, presentation: .tabletPortrait)
                 case .hierarchy:
                     HierarchyView(board: board, presentation: .tabletPortrait)
+                case .aiPM:
+                    RemoteAIPMWorkspaceView()
                 }
             } else {
                 ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
@@ -418,6 +425,9 @@ private struct TabletLandscapeWorkspace: View {
                             .frame(maxWidth: .infinity)
                     case .hierarchy:
                         HierarchyView(board: board, presentation: .tabletLandscape)
+                            .frame(maxWidth: .infinity)
+                    case .aiPM:
+                        RemoteAIPMWorkspaceView()
                             .frame(maxWidth: .infinity)
                     }
                 } else {
@@ -500,6 +510,8 @@ private struct CompactRootView: View {
                         CompactBoardView(board: board, selectedColumnID: $selectedColumnID)
                     case .hierarchy:
                         HierarchyView(board: board, presentation: .compact)
+                    case .aiPM:
+                        RemoteAIPMWorkspaceView()
                     }
                 } else {
                     ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create a board to start tracking beads."))
@@ -1185,11 +1197,31 @@ private struct LLMSettingsSheet: View {
     }
 }
 
+private struct AIPMWorkspaceView: View {
+    @ObservedObject var pmState: AIPMStateStore
+
+    var body: some View {
+        AIPMDashboardContent(pmState: pmState)
+            .navigationTitle("AI PM")
+    }
+}
+
 private struct AIPMDashboardSheet: View {
+    @ObservedObject var pmState: AIPMStateStore
+
+    var body: some View {
+        AIPMDashboardContent(pmState: pmState, showsSheetActions: true)
+            .frame(width: 640)
+            .frame(minHeight: 620)
+    }
+}
+
+private struct AIPMDashboardContent: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var server: BeadsHTTPServer
     @EnvironmentObject private var store: BoardStore
     @ObservedObject var pmState: AIPMStateStore
+    var showsSheetActions = false
 
     @State private var draft = AIPMAutomationSettings()
     @State private var isRunning = false
@@ -1312,36 +1344,59 @@ private struct AIPMDashboardSheet: View {
             }
             .formStyle(.grouped)
 
-            Divider()
+            if showsSheetActions {
+                Divider()
 
-            HStack {
-                Button("Run Now") {
-                    Task { await runPM() }
+                HStack {
+                    Button("Run Now") {
+                        Task { await runPM() }
+                    }
+                    .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
+
+                    if isRunning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    Spacer()
+
+                    Button("Cancel") {
+                        dismiss()
+                    }
+
+                    Button("Save") {
+                        save()
+                        dismiss()
+                    }
+                    .keyboardShortcut(.defaultAction)
                 }
-                .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
-
-                if isRunning {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-                Spacer()
-
-                Button("Cancel") {
-                    dismiss()
-                }
-
-                Button("Save") {
-                    save()
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
+                .padding()
             }
-            .padding()
         }
         .navigationTitle("AI PM")
-        .frame(width: 640)
-        .frame(minHeight: 620)
+        .toolbar {
+            ToolbarItemGroup {
+                if !showsSheetActions {
+                    Button {
+                        Task { await runPM() }
+                    } label: {
+                        Label("Run AI PM", systemImage: "play.circle")
+                    }
+                    .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
+
+                    Button {
+                        save()
+                    } label: {
+                        Label("Save", systemImage: "checkmark.circle")
+                    }
+
+                    if isRunning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
         .onAppear {
             draft = pmState.state.settings
         }
@@ -1841,106 +1896,121 @@ private final class QRScannerViewController: UIViewController, AVCaptureMetadata
     }
 }
 
+private struct RemoteAIPMWorkspaceView: View {
+    var body: some View {
+        RemoteAIPMDashboardContent()
+            .navigationTitle("AI PM")
+    }
+}
+
 private struct RemoteAIPMDashboardSheet: View {
     @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            RemoteAIPMDashboardContent()
+                .navigationTitle("AI PM")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
+                }
+        }
+    }
+}
+
+private struct RemoteAIPMDashboardContent: View {
     @EnvironmentObject private var store: BoardStore
     @State private var isRunning = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Status") {
-                    Text(store.remoteAIPMStatusMessage)
-                        .foregroundStyle(.secondary)
+        Form {
+            Section("Status") {
+                Text(store.remoteAIPMStatusMessage)
+                    .foregroundStyle(.secondary)
 
-                    if let state = store.remoteAIPMState {
-                        LabeledContent("Last run", value: lastRunText(for: state))
-                        LabeledContent("Next run", value: nextRunText(for: state))
-                        LabeledContent("Pending decisions", value: "\(state.pendingProposals.count)")
-                        LabeledContent("High-risk decisions", value: "\(state.highRiskPendingProposals.count)")
-                        LabeledContent("Cadence", value: state.settings.cadence.displayName)
-                        LabeledContent("Autonomy", value: state.settings.autonomyLevel.displayName)
-                        if let summary = state.lastRunSummary, !summary.isEmpty {
-                            Text(summary)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let error = state.lastRunError, !error.isEmpty {
-                            Text(error)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                Section("Project Intelligence") {
-                    if let state = store.remoteAIPMState, let intelligence = state.latestIntelligence {
-                        AIPMProjectIntelligenceView(intelligence: intelligence)
-                    } else {
-                        Text("No project intelligence generated yet.")
+                if let state = store.remoteAIPMState {
+                    LabeledContent("Last run", value: lastRunText(for: state))
+                    LabeledContent("Next run", value: nextRunText(for: state))
+                    LabeledContent("Pending decisions", value: "\(state.pendingProposals.count)")
+                    LabeledContent("High-risk decisions", value: "\(state.highRiskPendingProposals.count)")
+                    LabeledContent("Cadence", value: state.settings.cadence.displayName)
+                    LabeledContent("Autonomy", value: state.settings.autonomyLevel.displayName)
+                    if let summary = state.lastRunSummary, !summary.isEmpty {
+                        Text(summary)
                             .foregroundStyle(.secondary)
                     }
-                }
-
-                Section {
-                    Button {
-                        Task { await refresh() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-
-                    Button {
-                        Task { await runPM() }
-                    } label: {
-                        Label("Run AI PM", systemImage: "play.circle")
-                    }
-                    .disabled(isRunning)
-
-                    if isRunning {
-                        ProgressView()
-                    }
-                }
-
-                Section("Pending Decisions") {
-                    if let state = store.remoteAIPMState, !state.pendingProposals.isEmpty {
-                        ForEach(state.pendingProposals) { proposal in
-                            RemoteAIPMProposalRow(proposal: proposal)
-                        }
-                    } else {
-                        Text("No pending decisions.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Recent Reports") {
-                    if let state = store.remoteAIPMState, !state.reports.isEmpty {
-                        ForEach(state.reports.prefix(5)) { report in
-                            RemoteAIPMReportRow(report: report)
-                        }
-                    } else {
-                        Text("No reports generated yet.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Audit History") {
-                    if let state = store.remoteAIPMState, !state.auditEvents.isEmpty {
-                        ForEach(state.auditEvents.prefix(8)) { event in
-                            AIPMAuditEventRow(event: event)
-                        }
-                    } else {
-                        Text("No audit events yet.")
-                            .foregroundStyle(.secondary)
+                    if let error = state.lastRunError, !error.isEmpty {
+                        Text(error)
+                            .foregroundStyle(.red)
                     }
                 }
             }
-            .navigationTitle("AI PM")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
+
+            Section("Project Intelligence") {
+                if let state = store.remoteAIPMState, let intelligence = state.latestIntelligence {
+                    AIPMProjectIntelligenceView(intelligence: intelligence)
+                } else {
+                    Text("No project intelligence generated yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+
+                Button {
+                    Task { await runPM() }
+                } label: {
+                    Label("Run AI PM", systemImage: "play.circle")
+                }
+                .disabled(isRunning)
+
+                if isRunning {
+                    ProgressView()
+                }
+            }
+
+            Section("Pending Decisions") {
+                if let state = store.remoteAIPMState, !state.pendingProposals.isEmpty {
+                    ForEach(state.pendingProposals) { proposal in
+                        RemoteAIPMProposalRow(proposal: proposal)
                     }
+                } else {
+                    Text("No pending decisions.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Recent Reports") {
+                if let state = store.remoteAIPMState, !state.reports.isEmpty {
+                    ForEach(state.reports.prefix(5)) { report in
+                        RemoteAIPMReportRow(report: report)
+                    }
+                } else {
+                    Text("No reports generated yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Audit History") {
+                if let state = store.remoteAIPMState, !state.auditEvents.isEmpty {
+                    ForEach(state.auditEvents.prefix(8)) { event in
+                        AIPMAuditEventRow(event: event)
+                    }
+                } else {
+                    Text("No audit events yet.")
+                        .foregroundStyle(.secondary)
                 }
             }
         }
+        .navigationTitle("AI PM")
         .task {
             await refresh()
         }
