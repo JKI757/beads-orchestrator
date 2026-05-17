@@ -734,7 +734,7 @@ enum LLMProviderKind: String, Codable, CaseIterable, Identifiable {
     }
 
     var requiresAPIKey: Bool {
-        self == .remoteOpenAICompatible
+        false
     }
 }
 
@@ -805,6 +805,57 @@ final class LLMServerConfigurationStore: ObservableObject {
         lastFailureMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    func discoverModels(for configuration: LLMServerConfiguration) async throws -> [String] {
+        let sanitizedConfiguration = sanitized(configuration)
+        guard sanitizedConfiguration.provider.requiresEndpoint else { return [] }
+        guard let endpointURL = sanitizedConfiguration.endpointURL else {
+            throw LLMEndpointDiscoveryError.unavailable("Enter a valid HTTP endpoint before discovering models.")
+        }
+
+        var request = URLRequest(url: endpointURL.appending(path: "models"))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        if !sanitizedConfiguration.trimmedAPIKey.isEmpty {
+            request.setValue("Bearer \(sanitizedConfiguration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw LLMEndpointDiscoveryError.invalidResponse
+        }
+        guard 200..<300 ~= httpResponse.statusCode else {
+            throw LLMEndpointDiscoveryError.providerStatus(httpResponse.statusCode)
+        }
+
+        let payload = try BeadsJSON.decoder.decode(OpenAIModelsResponse.self, from: data)
+        return payload.data.map(\.id).filter { !$0.isEmpty }.sorted()
+    }
+
+    func testEndpoint(_ configuration: LLMServerConfiguration) async -> LLMEndpointTestResult {
+        do {
+            let models = try await discoverModels(for: configuration)
+            if models.isEmpty {
+                return LLMEndpointTestResult(
+                    isSuccessful: false,
+                    message: "Endpoint responded, but returned no models.",
+                    models: []
+                )
+            }
+            return LLMEndpointTestResult(
+                isSuccessful: true,
+                message: "Endpoint returned \(models.count) model\(models.count == 1 ? "" : "s").",
+                models: models
+            )
+        } catch {
+            recordProviderFailure(error.localizedDescription)
+            return LLMEndpointTestResult(
+                isSuccessful: false,
+                message: error.localizedDescription,
+                models: []
+            )
+        }
+    }
+
     private func sanitizedStatus(for configuration: LLMServerConfiguration) -> BeadsLLMStatus {
         let providerName = configuration.provider.displayName
         let modelName = configuration.trimmedModelName
@@ -834,17 +885,7 @@ final class LLMServerConfigurationStore: ObservableObject {
                 isAvailable: false,
                 provider: providerName,
                 model: nil,
-                message: "Choose a model before enabling planning assistance.",
-                updatedAt: Date()
-            )
-        }
-
-        if configuration.provider.requiresAPIKey, configuration.trimmedAPIKey.isEmpty {
-            return BeadsLLMStatus(
-                isAvailable: false,
-                provider: providerName,
-                model: modelName,
-                message: "Add an API key for the remote LLM provider.",
+                message: "Discover and choose a model before enabling planning assistance.",
                 updatedAt: Date()
             )
         }
@@ -873,6 +914,14 @@ final class LLMServerConfigurationStore: ObservableObject {
         return scheme == "http" || scheme == "https"
     }
 
+    private func sanitized(_ configuration: LLMServerConfiguration) -> LLMServerConfiguration {
+        var sanitizedConfiguration = configuration
+        sanitizedConfiguration.endpointURLString = configuration.trimmedEndpointURLString
+        sanitizedConfiguration.modelName = configuration.trimmedModelName
+        sanitizedConfiguration.apiKey = configuration.trimmedAPIKey
+        return sanitizedConfiguration
+    }
+
     private func persist() {
         do {
             let directory = persistenceURL.deletingLastPathComponent()
@@ -895,6 +944,37 @@ final class LLMServerConfigurationStore: ObservableObject {
         return root
             .appendingPathComponent("Beads-Orchestrator", isDirectory: true)
             .appendingPathComponent("llm-configuration.json")
+    }
+}
+
+struct LLMEndpointTestResult: Equatable {
+    var isSuccessful: Bool
+    var message: String
+    var models: [String]
+}
+
+struct OpenAIModelsResponse: Decodable, Equatable {
+    struct Model: Decodable, Equatable {
+        var id: String
+    }
+
+    var data: [Model]
+}
+
+private enum LLMEndpointDiscoveryError: LocalizedError {
+    case unavailable(String)
+    case invalidResponse
+    case providerStatus(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case let .unavailable(message):
+            message
+        case .invalidResponse:
+            "The LLM endpoint returned an invalid response."
+        case let .providerStatus(status):
+            "The LLM endpoint returned HTTP \(status)."
+        }
     }
 }
 #endif

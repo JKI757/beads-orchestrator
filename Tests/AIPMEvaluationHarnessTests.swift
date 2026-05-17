@@ -205,6 +205,33 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertEqual(response.changes.first?.priority, .high)
     }
 
+    func testLLMSettingsAllowUnauthenticatedEndpointAndDecodeModels() throws {
+        let modelsJSON = """
+        {
+          "object": "list",
+          "data": [
+            { "id": "qwen2.5-coder:7b", "object": "model" },
+            { "id": "llama3.2:latest", "object": "model" }
+          ]
+        }
+        """
+        let models = try BeadsJSON.decoder.decode(OpenAIModelsResponse.self, from: Data(modelsJSON.utf8))
+        let configuration = LLMServerConfiguration(
+            provider: .remoteOpenAICompatible,
+            endpointURLString: " http://127.0.0.1:11434/v1 ",
+            modelName: " llama3.2:latest ",
+            apiKey: " "
+        )
+        let store = LLMServerConfigurationStore(persistenceURL: temporaryFile("llm.json"))
+
+        store.save(configuration)
+
+        XCTAssertEqual(models.data.map(\.id), ["qwen2.5-coder:7b", "llama3.2:latest"])
+        XCTAssertTrue(store.status.isAvailable)
+        XCTAssertEqual(store.status.model, "llama3.2:latest")
+        XCTAssertEqual(store.configuration.trimmedAPIKey, "")
+    }
+
     func testAIPMStatePersistenceRecordsRunsFailuresAndAuditEvents() {
         let stateURL = temporaryFile("pm-state.json")
         let store = AIPMStateStore(persistenceURL: stateURL)

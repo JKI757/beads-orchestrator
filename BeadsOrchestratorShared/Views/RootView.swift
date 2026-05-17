@@ -934,6 +934,10 @@ private struct LLMSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var configurationStore: LLMServerConfigurationStore
     @State private var draft = LLMServerConfiguration()
+    @State private var discoveredModels: [String] = []
+    @State private var endpointMessage: String?
+    @State private var isDiscoveringModels = false
+    @State private var isTestingEndpoint = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -948,13 +952,50 @@ private struct LLMSettingsSheet: View {
                     if draft.provider.requiresEndpoint {
                         TextField("Endpoint URL", text: $draft.endpointURLString)
                             .textFieldStyle(.roundedBorder)
-                        TextField("Model", text: $draft.modelName)
-                            .textFieldStyle(.roundedBorder)
+
+                        if discoveredModels.isEmpty {
+                            TextField("Model", text: $draft.modelName)
+                                .textFieldStyle(.roundedBorder)
+                        } else {
+                            Picker("Model", selection: $draft.modelName) {
+                                ForEach(discoveredModels, id: \.self) { model in
+                                    Text(model).tag(model)
+                                }
+                            }
+                        }
+
+                        HStack {
+                            Button {
+                                Task { await discoverModels() }
+                            } label: {
+                                Label("Discover Models", systemImage: "magnifyingglass")
+                            }
+                            .disabled(isDiscoveringModels || isTestingEndpoint)
+
+                            Button {
+                                Task { await testEndpoint() }
+                            } label: {
+                                Label("Test Endpoint", systemImage: "checkmark.circle")
+                            }
+                            .disabled(isDiscoveringModels || isTestingEndpoint)
+                        }
                     }
 
-                    if draft.provider.requiresAPIKey {
+                    if draft.provider != .disabled {
                         SecureField("API key", text: $draft.apiKey)
                             .textFieldStyle(.roundedBorder)
+                        Text("Optional for local or unauthenticated OpenAI-compatible endpoints.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if isDiscoveringModels || isTestingEndpoint {
+                        ProgressView(isDiscoveringModels ? "Discovering models..." : "Testing endpoint...")
+                    }
+
+                    if let endpointMessage {
+                        Text(endpointMessage)
+                            .foregroundStyle(endpointMessageColor)
                     }
                 }
 
@@ -986,7 +1027,12 @@ private struct LLMSettingsSheet: View {
                     dismiss()
                 }
 
-                Button("Save") {
+                Button("Apply") {
+                    configurationStore.save(draft)
+                    endpointMessage = "Settings applied."
+                }
+
+                Button("Save & Close") {
                     configurationStore.save(draft)
                     dismiss()
                 }
@@ -999,7 +1045,56 @@ private struct LLMSettingsSheet: View {
         .frame(minHeight: 360)
         .onAppear {
             draft = configurationStore.configuration
+            discoveredModels = draft.trimmedModelName.isEmpty ? [] : [draft.trimmedModelName]
         }
+        .onChange(of: draft.provider) {
+            discoveredModels = draft.trimmedModelName.isEmpty ? [] : [draft.trimmedModelName]
+            endpointMessage = nil
+        }
+        .onChange(of: draft.endpointURLString) {
+            discoveredModels = draft.trimmedModelName.isEmpty ? [] : [draft.trimmedModelName]
+            endpointMessage = nil
+        }
+    }
+
+    private func discoverModels() async {
+        isDiscoveringModels = true
+        defer { isDiscoveringModels = false }
+
+        do {
+            let models = try await configurationStore.discoverModels(for: draft)
+            discoveredModels = models
+            if draft.trimmedModelName.isEmpty, let firstModel = models.first {
+                draft.modelName = firstModel
+            }
+            endpointMessage = models.isEmpty
+                ? "Endpoint responded, but returned no models."
+                : "Endpoint returned \(models.count) model\(models.count == 1 ? "" : "s")."
+        } catch {
+            endpointMessage = error.localizedDescription
+        }
+    }
+
+    private func testEndpoint() async {
+        isTestingEndpoint = true
+        defer { isTestingEndpoint = false }
+
+        let result = await configurationStore.testEndpoint(draft)
+        if !result.models.isEmpty {
+            discoveredModels = result.models
+            if draft.trimmedModelName.isEmpty, let firstModel = result.models.first {
+                draft.modelName = firstModel
+            }
+        }
+        endpointMessage = result.message
+    }
+
+    private var endpointMessageColor: Color {
+        guard let endpointMessage else { return .secondary }
+        if endpointMessage.hasPrefix("Endpoint returned") || endpointMessage == "Settings applied." {
+            return .green
+        }
+        return .secondary
     }
 }
 
