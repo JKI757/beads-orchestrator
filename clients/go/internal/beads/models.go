@@ -63,3 +63,45 @@ type Bead struct {
 	UpdatedAt          time.Time  `json:"updatedAt"`
 	ArchivedAt         *time.Time `json:"archivedAt,omitempty"`
 }
+
+type BeadDraft struct {
+	Title              string   `json:"title"`
+	BeadsID            *string  `json:"beadsID,omitempty"`
+	IssueType          *string  `json:"issueType,omitempty"`
+	Status             *string  `json:"status,omitempty"`
+	ParentBeadsID      *string  `json:"parentBeadsID,omitempty"`
+	ChildBeadsIDs      []string `json:"childBeadsIDs"`
+	DependencyBeadsIDs []string `json:"dependencyBeadsIDs"`
+	DependentBeadsIDs  []string `json:"dependentBeadsIDs"`
+	DependencyCount    int      `json:"dependencyCount"`
+	DependentCount     int      `json:"dependentCount"`
+	Summary            string   `json:"summary"`
+	SourceType         string   `json:"sourceType"`
+	SourceURL          *string  `json:"sourceURL,omitempty"`
+	BranchName         string   `json:"branchName"`
+	IssueNumber        *int     `json:"issueNumber,omitempty"`
+	PullRequestNumber  *int     `json:"pullRequestNumber,omitempty"`
+	LabelsText         string   `json:"labelsText"`
+	Priority           string   `json:"priority"`
+	IsBlocked          bool     `json:"isBlocked"`
+	IsStale            bool     `json:"isStale"`
+	Notes              string   `json:"notes"`
+}
+
+type BeadFieldSuggestionRequest struct {
+	BoardID       *string   `json:"boardID,omitempty"`
+	EditingBeadID *string   `json:"editingBeadID,omitempty"`
+	Draft         BeadDraft `json:"draft"`
+}
+
+type BeadFieldSuggestionResponse struct {
+	Message     string                `json:"message"`
+	Suggestions []BeadFieldSuggestion `json:"suggestions"`
+	GeneratedAt time.Time             `json:"generatedAt"`
+}
+
+type BeadFieldSuggestion struct {
+	Field     string `json:"field"`
+	Value     string `json:"value"`
+	Rationale string `json:"rationale"`
+}

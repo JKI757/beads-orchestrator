@@ -32,11 +32,31 @@ struct BeadsServerClient {
         try await get("llm/status", as: BeadsLLMStatus.self)
     }
 
+    func suggestBeadFields(_ suggestionRequest: BeadFieldSuggestionRequest) async throws -> BeadFieldSuggestionResponse {
+        try await post("ai/bead-suggestions", body: suggestionRequest, as: BeadFieldSuggestionResponse.self)
+    }
+
     private func get<Value: Decodable>(_ path: String, as type: Value.Type, requiresAuth: Bool = true) async throws -> Value {
         var request = URLRequest(url: endpoint(path))
         if requiresAuth {
             try authorize(&request)
         }
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response)
+        return try BeadsJSON.decoder.decode(type, from: data)
+    }
+
+    private func post<Body: Encodable, Value: Decodable>(
+        _ path: String,
+        body: Body,
+        as type: Value.Type
+    ) async throws -> Value {
+        var request = URLRequest(url: endpoint(path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try authorize(&request)
+        request.httpBody = try BeadsJSON.encoder.encode(body)
 
         let (data, response) = try await session.data(for: request)
         try validate(response)

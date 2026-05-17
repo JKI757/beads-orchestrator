@@ -200,6 +200,14 @@ final class BeadsHTTPServer: ObservableObject {
                 }
                 return try jsonResponse(llmConfiguration.status)
 
+            case ("POST", "/ai/bead-suggestions"):
+                guard isAuthorized(request) else {
+                    return httpResponse(status: 401, body: Data())
+                }
+                let request = try BeadsJSON.decoder.decode(BeadFieldSuggestionRequest.self, from: request.body)
+                let response = try await suggestBeadFields(request: request, store: store)
+                return try jsonResponse(response)
+
             case ("PUT", "/boards"):
                 guard isAuthorized(request) else {
                     return httpResponse(status: 401, body: Data())
@@ -212,8 +220,175 @@ final class BeadsHTTPServer: ObservableObject {
                 return httpResponse(status: 404, body: Data())
             }
         } catch {
-            return httpResponse(status: 422, body: Data())
+            return httpResponse(status: 422, body: Data(error.localizedDescription.utf8))
         }
+    }
+
+    func suggestBeadFields(request: BeadFieldSuggestionRequest) async throws -> BeadFieldSuggestionResponse {
+        guard let store else {
+            throw LLMProviderError.unavailable("No board store is attached to the server.")
+        }
+        return try await suggestBeadFields(request: request, store: store)
+    }
+
+    private func suggestBeadFields(
+        request: BeadFieldSuggestionRequest,
+        store: BoardStore
+    ) async throws -> BeadFieldSuggestionResponse {
+        let status = llmConfiguration.status
+        guard status.isAvailable else {
+            throw LLMProviderError.unavailable(status.message)
+        }
+
+        let configuration = llmConfiguration.configuration
+        guard let endpointURL = configuration.endpointURL else {
+            throw LLMProviderError.unavailable("The LLM endpoint URL is invalid.")
+        }
+
+        let prompt = beadSuggestionPrompt(request: request, store: store)
+        let llmResponse = try await requestLLMJSON(
+            endpointURL: endpointURL.appending(path: "chat/completions"),
+            configuration: configuration,
+            userPrompt: prompt
+        )
+
+        do {
+            let payload = try BeadsJSON.decoder.decode(LLMBeadSuggestionPayload.self, from: llmResponse)
+            return BeadFieldSuggestionResponse(
+                message: payload.message,
+                suggestions: payload.suggestions,
+                generatedAt: Date()
+            )
+        } catch {
+            llmConfiguration.recordProviderFailure("The provider returned suggestions in an unreadable format.")
+            throw LLMProviderError.invalidResponse
+        }
+    }
+
+    private func requestLLMJSON(
+        endpointURL: URL,
+        configuration: LLMServerConfiguration,
+        userPrompt: String
+    ) async throws -> Data {
+        var request = URLRequest(url: endpointURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if configuration.provider.requiresAPIKey {
+            request.setValue("Bearer \(configuration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let chatRequest = OpenAIChatRequest(
+            model: configuration.trimmedModelName,
+            messages: [
+                OpenAIChatMessage(
+                    role: "system",
+                    content: "You are an AI project manager for a software issue tracker. Return strict JSON only. Do not include markdown."
+                ),
+                OpenAIChatMessage(role: "user", content: userPrompt)
+            ],
+            temperature: 0.2,
+            responseFormat: OpenAIResponseFormat(type: "json_object")
+        )
+        request.httpBody = try BeadsJSON.encoder.encode(chatRequest)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw LLMProviderError.invalidResponse
+            }
+            guard 200..<300 ~= httpResponse.statusCode else {
+                throw LLMProviderError.providerStatus(httpResponse.statusCode)
+            }
+
+            let chatResponse = try BeadsJSON.decoder.decode(OpenAIChatResponse.self, from: data)
+            guard let content = chatResponse.choices.first?.message.content else {
+                throw LLMProviderError.invalidResponse
+            }
+            return Data(stripJSONCodeFence(from: content).utf8)
+        } catch let error as LLMProviderError {
+            llmConfiguration.recordProviderFailure(error.localizedDescription)
+            throw error
+        } catch {
+            llmConfiguration.recordProviderFailure(error.localizedDescription)
+            throw LLMProviderError.unavailable(error.localizedDescription)
+        }
+    }
+
+    private func beadSuggestionPrompt(request: BeadFieldSuggestionRequest, store: BoardStore) -> String {
+        let board = request.boardID.flatMap { boardID in
+            store.boards.first { $0.id == boardID }
+        } ?? store.selectedBoard
+
+        let boardContext = board.map { board in
+            let beads = board.columns
+                .flatMap(\.beads)
+                .filter { !$0.isArchived && $0.id != request.editingBeadID }
+                .prefix(40)
+                .map { bead in
+                    [
+                        "id=\(bead.relationshipID)",
+                        "title=\(bead.title)",
+                        "type=\(bead.issueType ?? bead.sourceType.displayName)",
+                        "status=\(bead.status ?? store.columnName(for: bead) ?? "Unknown")",
+                        "priority=\(bead.priority.rawValue)",
+                        "parent=\(bead.parentBeadsID ?? "none")"
+                    ].joined(separator: " | ")
+                }
+                .joined(separator: "\n")
+
+            return """
+            Board: \(board.name)
+            Repository: \(board.repositoryName)
+            Columns: \(board.columns.map(\.name).joined(separator: ", "))
+            Existing beads:
+            \(beads.isEmpty ? "No existing beads." : beads)
+            """
+        } ?? "No board context is available."
+
+        let draft = request.draft
+        return """
+        Complete missing fields for a bead draft. Suggest only useful fields. It is acceptable to suggest replacing a user-entered field, but only when clearly helpful.
+
+        Return JSON with exactly this shape:
+        {
+          "message": "short status message",
+          "suggestions": [
+            {
+              "field": "summary|notes|labels|priority|issueType|parentBeadsID|dependencyBeadsIDs|title",
+              "value": "field value as plain text; labels and dependency IDs are comma-separated",
+              "rationale": "why this helps"
+            }
+          ]
+        }
+
+        Use "notes" for acceptance criteria and implementation guidance. Use "parentBeadsID" and "dependencyBeadsIDs" only when the ID exists in board context. Priority must be one of low, normal, high, urgent. Issue type should be a concise category such as task, bug, feature, epic, chore, or research.
+
+        Current draft:
+        Title: \(draft.title)
+        Summary: \(draft.summary)
+        Labels: \(draft.labelsText)
+        Priority: \(draft.priority.rawValue)
+        Issue Type: \(draft.issueType ?? "")
+        Parent ID: \(draft.parentBeadsID ?? "")
+        Dependencies: \(draft.dependencyBeadsIDs.joined(separator: ", "))
+        Notes: \(draft.notes)
+
+        \(boardContext)
+        """
+    }
+
+    private func stripJSONCodeFence(from content: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("```") else { return trimmed }
+
+        var lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if !lines.isEmpty {
+            lines.removeFirst()
+        }
+        if lines.last?.trimmingCharacters(in: .whitespacesAndNewlines) == "```" {
+            lines.removeLast()
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func serverInfo(store: BoardStore) -> BeadsServerInfo {
@@ -231,7 +406,7 @@ final class BeadsHTTPServer: ObservableObject {
                 "board-snapshot-replace",
                 "beads-relationship-metadata",
                 "server-side-llm-status"
-            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance"] : []),
+            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance", "ai-bead-field-suggestions"] : []),
             llmStatus: llmConfiguration.status
         )
     }
@@ -272,6 +447,59 @@ final class BeadsHTTPServer: ObservableObject {
 
     private var localHostName: String {
         ProcessInfo.processInfo.hostName
+    }
+}
+
+private struct LLMBeadSuggestionPayload: Decodable {
+    var message: String
+    var suggestions: [BeadFieldSuggestion]
+}
+
+private struct OpenAIChatRequest: Encodable {
+    var model: String
+    var messages: [OpenAIChatMessage]
+    var temperature: Double
+    var responseFormat: OpenAIResponseFormat
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case temperature
+        case responseFormat = "response_format"
+    }
+}
+
+private struct OpenAIChatMessage: Codable {
+    var role: String
+    var content: String
+}
+
+private struct OpenAIResponseFormat: Encodable {
+    var type: String
+}
+
+private struct OpenAIChatResponse: Decodable {
+    struct Choice: Decodable {
+        var message: OpenAIChatMessage
+    }
+
+    var choices: [Choice]
+}
+
+private enum LLMProviderError: LocalizedError {
+    case unavailable(String)
+    case invalidResponse
+    case providerStatus(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let message):
+            message
+        case .invalidResponse:
+            "The LLM provider returned an invalid response."
+        case .providerStatus(let status):
+            "The LLM provider returned HTTP \(status)."
+        }
     }
 }
 

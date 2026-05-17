@@ -65,6 +65,12 @@ func (c *Client) LLMStatus(ctx context.Context) (LLMStatus, error) {
 	return status, err
 }
 
+func (c *Client) SuggestBeadFields(ctx context.Context, request BeadFieldSuggestionRequest) (BeadFieldSuggestionResponse, error) {
+	var response BeadFieldSuggestionResponse
+	err := c.post(ctx, "ai/bead-suggestions", request, true, &response)
+	return response, err
+}
+
 func (c *Client) ReplaceBoards(ctx context.Context, boards []Board) error {
 	body, err := json.MarshalIndent(boards, "", "  ")
 	if err != nil {
@@ -85,6 +91,23 @@ func (c *Client) get(ctx context.Context, path string, requiresAuth bool, target
 	if err != nil {
 		return err
 	}
+	if requiresAuth {
+		c.authorize(req)
+	}
+	return c.do(req, target)
+}
+
+func (c *Client) post(ctx context.Context, path string, body any, requiresAuth bool, target any) error {
+	payload, err := json.MarshalIndent(body, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(path), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	if requiresAuth {
 		c.authorize(req)
 	}

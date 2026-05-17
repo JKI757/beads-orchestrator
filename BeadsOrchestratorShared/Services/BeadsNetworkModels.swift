@@ -19,6 +19,64 @@ struct BeadsLLMStatus: Codable, Equatable {
     var updatedAt: Date
 }
 
+struct BeadFieldSuggestionRequest: Codable, Equatable {
+    var boardID: Board.ID?
+    var editingBeadID: Bead.ID?
+    var draft: BeadDraft
+}
+
+struct BeadFieldSuggestionResponse: Codable, Equatable {
+    var message: String
+    var suggestions: [BeadFieldSuggestion]
+    var generatedAt: Date
+}
+
+struct BeadFieldSuggestion: Codable, Equatable, Identifiable {
+    var field: BeadSuggestionField
+    var value: String
+    var rationale: String
+
+    var id: String {
+        "\(field.rawValue)|\(value)"
+    }
+}
+
+enum BeadSuggestionField: String, Codable, CaseIterable, Identifiable {
+    case title
+    case summary
+    case notes
+    case labels
+    case priority
+    case issueType
+    case parentBeadsID
+    case dependencyBeadsIDs
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .title:
+            "Title"
+        case .summary:
+            "Description"
+        case .notes:
+            "Acceptance Criteria"
+        case .labels:
+            "Labels"
+        case .priority:
+            "Priority"
+        case .issueType:
+            "Issue Type"
+        case .parentBeadsID:
+            "Parent"
+        case .dependencyBeadsIDs:
+            "Dependencies"
+        }
+    }
+}
+
 struct BeadsRemoteConfiguration: Codable, Equatable {
     var serverURLString: String
     var pairingToken: String

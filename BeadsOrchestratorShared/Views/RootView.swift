@@ -1334,9 +1334,15 @@ enum BeadEditorMode {
 struct BeadEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: BoardStore
+    #if os(macOS)
+    @EnvironmentObject private var server: BeadsHTTPServer
+    #endif
 
     let mode: BeadEditorMode
     @State private var draft: BeadDraft
+    @State private var suggestionResponse: BeadFieldSuggestionResponse?
+    @State private var suggestionErrorMessage: String?
+    @State private var isRequestingSuggestions = false
 
     init(mode: BeadEditorMode) {
         self.mode = mode
@@ -1357,6 +1363,10 @@ struct BeadEditorSheet: View {
                     TextField("Title", text: $draft.title)
                     TextField("Summary", text: $draft.summary, axis: .vertical)
                         .lineLimit(3...6)
+                    TextField("Issue Type", text: Binding(
+                        get: { draft.issueType ?? "" },
+                        set: { draft.issueType = $0.nilIfBlank }
+                    ))
                     TextField("Labels", text: $draft.labelsText)
                     Picker("Priority", selection: $draft.priority) {
                         ForEach(BeadPriority.allCases) { priority in
@@ -1407,6 +1417,36 @@ struct BeadEditorSheet: View {
                     TextField("Notes", text: $draft.notes, axis: .vertical)
                         .lineLimit(4...10)
                 }
+
+                Section("AI Suggestions") {
+                    Button {
+                        requestSuggestions()
+                    } label: {
+                        Label(
+                            isRequestingSuggestions ? "Requesting Suggestions" : "Suggest Missing Fields",
+                            systemImage: "sparkles"
+                        )
+                    }
+                    .disabled(isRequestingSuggestions)
+
+                    if let suggestionErrorMessage {
+                        Text(suggestionErrorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    if let suggestionResponse {
+                        Text(suggestionResponse.message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        ForEach(suggestionResponse.suggestions) { suggestion in
+                            BeadSuggestionRow(suggestion: suggestion) {
+                                applySuggestion(suggestion)
+                            }
+                        }
+                    }
+                }
             }
             .navigationTitle(mode.title)
             .toolbar {
@@ -1435,6 +1475,107 @@ struct BeadEditorSheet: View {
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 560)
         #endif
+    }
+
+    private func requestSuggestions() {
+        isRequestingSuggestions = true
+        suggestionErrorMessage = nil
+
+        Task {
+            do {
+                let request = BeadFieldSuggestionRequest(
+                    boardID: store.selectedBoardID,
+                    editingBeadID: mode.editingBeadID,
+                    draft: draft
+                )
+
+                let response: BeadFieldSuggestionResponse
+                #if os(macOS)
+                response = try await server.suggestBeadFields(request: request)
+                #else
+                response = try await store.suggestBeadFields(for: draft, editingBeadID: mode.editingBeadID)
+                #endif
+
+                suggestionResponse = response
+            } catch {
+                suggestionErrorMessage = error.localizedDescription
+            }
+            isRequestingSuggestions = false
+        }
+    }
+
+    private func applySuggestion(_ suggestion: BeadFieldSuggestion) {
+        switch suggestion.field {
+        case .title:
+            draft.title = suggestion.value
+        case .summary:
+            draft.summary = suggestion.value
+        case .notes:
+            draft.notes = appendedValue(existing: draft.notes, suggested: suggestion.value)
+        case .labels:
+            draft.labelsText = mergedCommaList(draft.labelsText, suggestion.value)
+        case .priority:
+            if let priority = BeadPriority(rawValue: suggestion.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+                draft.priority = priority
+            }
+        case .issueType:
+            draft.issueType = suggestion.value.nilIfBlank
+        case .parentBeadsID:
+            draft.parentBeadsID = suggestion.value.nilIfBlank
+        case .dependencyBeadsIDs:
+            draft.dependencyBeadsIDs = parsedCommaList(suggestion.value)
+            draft.dependencyCount = draft.dependencyBeadsIDs.count
+        }
+    }
+
+    private func appendedValue(existing: String, suggested: String) -> String {
+        let existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let suggested = suggested.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !existing.isEmpty else { return suggested }
+        guard !suggested.isEmpty else { return existing }
+        return existing + "\n\n" + suggested
+    }
+
+    private func mergedCommaList(_ existing: String, _ suggested: String) -> String {
+        let values = parsedCommaList(existing) + parsedCommaList(suggested)
+        return Array(NSOrderedSet(array: values)).compactMap { $0 as? String }.joined(separator: ", ")
+    }
+
+    private func parsedCommaList(_ value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private struct BeadSuggestionRow: View {
+    let suggestion: BeadFieldSuggestion
+    var apply: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(suggestion.field.displayName, systemImage: "sparkle")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button("Apply") {
+                    apply()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            Text(suggestion.value)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+
+            Text(suggestion.rationale)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
     }
 }
 

@@ -361,6 +361,16 @@ final class BoardStore: ObservableObject {
         }
     }
 
+    func suggestBeadFields(for draft: BeadDraft, editingBeadID: Bead.ID? = nil) async throws -> BeadFieldSuggestionResponse {
+        try await remoteClient.suggestBeadFields(
+            BeadFieldSuggestionRequest(
+                boardID: selectedBoardID,
+                editingBeadID: editingBeadID,
+                draft: draft
+            )
+        )
+    }
+
     func addImportedBeads(_ beads: [Bead], toColumnNamed columnName: String = "Ready") {
         guard let boardIndex = indexOfSelectedBoard, !beads.isEmpty else { return }
         let columnIndex = boards[boardIndex].columns.firstIndex { $0.name == columnName } ?? 0
@@ -655,7 +665,7 @@ final class BoardStore: ObservableObject {
     }
 }
 
-struct BeadDraft {
+struct BeadDraft: Codable, Equatable {
     var title = ""
     var beadsID: String?
     var issueType: String?
