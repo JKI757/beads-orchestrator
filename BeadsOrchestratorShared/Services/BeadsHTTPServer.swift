@@ -311,6 +311,15 @@ final class BeadsHTTPServer: ObservableObject {
         }
     }
 
+    func evaluateAIPMProjectIntelligence(
+        request: AIPMRunRequest = AIPMRunRequest(boardID: nil)
+    ) throws -> AIPMProjectIntelligenceSummary {
+        guard let store else {
+            throw LLMProviderError.unavailable("No board store is attached to the server.")
+        }
+        return try projectIntelligenceSummary(request: request, store: store)
+    }
+
     private func restartAutomationLoop() {
         automationTask?.cancel()
         automationTask = nil

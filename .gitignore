@@ -33,6 +33,7 @@ playground.xcworkspace/
 *.tmp
 *.swp
 *.swo
+*.profraw
 .env
 .env.*
 
