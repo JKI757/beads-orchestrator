@@ -40,6 +40,10 @@ struct BeadsServerClient {
         try await post("ai/plan-review", body: reviewRequest, as: BeadPlanReviewResponse.self)
     }
 
+    func statusReport(_ reportRequest: BeadStatusReportRequest) async throws -> BeadStatusReportResponse {
+        try await post("ai/status-report", body: reportRequest, as: BeadStatusReportResponse.self)
+    }
+
     private func get<Value: Decodable>(_ path: String, as type: Value.Type, requiresAuth: Bool = true) async throws -> Value {
         var request = URLRequest(url: endpoint(path))
         if requiresAuth {

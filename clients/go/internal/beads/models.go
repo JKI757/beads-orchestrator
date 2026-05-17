@@ -139,3 +139,21 @@ type BeadPlanReviewChange struct {
 	IssueType     *string  `json:"issueType,omitempty"`
 	Rationale     string   `json:"rationale"`
 }
+
+type BeadStatusReportRequest struct {
+	BoardID *string `json:"boardID,omitempty"`
+	BeadID  *string `json:"beadID,omitempty"`
+	Scope   string  `json:"scope"`
+}
+
+type BeadStatusReportResponse struct {
+	Title       string                    `json:"title"`
+	Summary     string                    `json:"summary"`
+	Sections    []BeadStatusReportSection `json:"sections"`
+	GeneratedAt time.Time                 `json:"generatedAt"`
+}
+
+type BeadStatusReportSection struct {
+	Title string   `json:"title"`
+	Items []string `json:"items"`
+}

@@ -172,6 +172,46 @@ enum BeadPlanReviewChangeKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+struct BeadStatusReportRequest: Codable, Equatable {
+    var boardID: Board.ID?
+    var beadID: Bead.ID?
+    var scope: BeadStatusReportScope
+}
+
+enum BeadStatusReportScope: String, Codable, CaseIterable, Identifiable {
+    case board
+    case subtree
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .board:
+            "Board"
+        case .subtree:
+            "Subtree"
+        }
+    }
+}
+
+struct BeadStatusReportResponse: Codable, Equatable {
+    var title: String
+    var summary: String
+    var sections: [BeadStatusReportSection]
+    var generatedAt: Date
+}
+
+struct BeadStatusReportSection: Codable, Equatable, Identifiable {
+    var title: String
+    var items: [String]
+
+    var id: String {
+        title
+    }
+}
+
 enum BeadSuggestionField: String, Codable, CaseIterable, Identifiable {
     case title
     case summary

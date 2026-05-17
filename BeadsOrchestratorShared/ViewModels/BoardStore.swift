@@ -381,6 +381,16 @@ final class BoardStore: ObservableObject {
         )
     }
 
+    func statusReport(for beadID: Bead.ID? = nil, scope: BeadStatusReportScope) async throws -> BeadStatusReportResponse {
+        try await remoteClient.statusReport(
+            BeadStatusReportRequest(
+                boardID: selectedBoardID,
+                beadID: beadID,
+                scope: scope
+            )
+        )
+    }
+
     func addImportedBeads(_ beads: [Bead], toColumnNamed columnName: String = "Ready") {
         guard let boardIndex = indexOfSelectedBoard, !beads.isEmpty else { return }
         let columnIndex = boards[boardIndex].columns.firstIndex { $0.name == columnName } ?? 0

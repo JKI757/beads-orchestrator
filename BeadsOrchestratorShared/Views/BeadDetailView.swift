@@ -479,6 +479,12 @@ private struct FormBeadInspector: View {
                 PlanReviewControls(bead: bead)
             }
 
+            if let board = store.selectedBoard {
+                Section("AI Status Report") {
+                    StatusReportButton(board: board, bead: bead, scope: .subtree)
+                }
+            }
+
             WorkflowSection(bead: bead)
         }
         .navigationTitle("Bead")
@@ -489,6 +495,7 @@ private struct FormBeadInspector: View {
 }
 
 private struct TabletLandscapeBeadInspector: View {
+    @EnvironmentObject private var store: BoardStore
     let bead: Bead
     @Binding var showingEditor: Bool
 
@@ -558,6 +565,12 @@ private struct TabletLandscapeBeadInspector: View {
 
                 InspectorSection("AI Plan Review") {
                     PlanReviewControls(bead: bead)
+                }
+
+                if let board = store.selectedBoard {
+                    InspectorSection("AI Status Report") {
+                        StatusReportButton(board: board, bead: bead, scope: .subtree)
+                    }
                 }
 
                 WorkflowSection(bead: bead)
@@ -722,6 +735,12 @@ private struct MacBeadInspector: View {
 
                 InspectorSection("AI Plan Review") {
                     PlanReviewControls(bead: bead)
+                }
+
+                if let board = store.selectedBoard {
+                    InspectorSection("AI Status Report") {
+                        StatusReportButton(board: board, bead: bead, scope: .subtree)
+                    }
                 }
 
                 InspectorSection("Workflow") {

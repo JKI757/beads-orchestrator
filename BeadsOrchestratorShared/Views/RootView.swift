@@ -697,14 +697,20 @@ private struct CompactBoardHeader: View {
     let board: Board
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(board.name)
-                .font(.title2.weight(.semibold))
-                .lineLimit(2)
-            Text(board.repositoryPath ?? "No local repository connected")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(board.name)
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(2)
+                Text(board.repositoryPath ?? "No local repository connected")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            StatusReportButton(board: board, compact: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)

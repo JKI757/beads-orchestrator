@@ -216,6 +216,14 @@ final class BeadsHTTPServer: ObservableObject {
                 let response = try await reviewPlan(request: request, store: store)
                 return try jsonResponse(response)
 
+            case ("POST", "/ai/status-report"):
+                guard isAuthorized(request) else {
+                    return httpResponse(status: 401, body: Data())
+                }
+                let request = try BeadsJSON.decoder.decode(BeadStatusReportRequest.self, from: request.body)
+                let response = try await statusReport(request: request, store: store)
+                return try jsonResponse(response)
+
             case ("PUT", "/boards"):
                 guard isAuthorized(request) else {
                     return httpResponse(status: 401, body: Data())
@@ -244,6 +252,13 @@ final class BeadsHTTPServer: ObservableObject {
             throw LLMProviderError.unavailable("No board store is attached to the server.")
         }
         return try await reviewPlan(request: request, store: store)
+    }
+
+    func statusReport(request: BeadStatusReportRequest) async throws -> BeadStatusReportResponse {
+        guard let store else {
+            throw LLMProviderError.unavailable("No board store is attached to the server.")
+        }
+        return try await statusReport(request: request, store: store)
     }
 
     private func suggestBeadFields(
@@ -311,6 +326,41 @@ final class BeadsHTTPServer: ObservableObject {
             )
         } catch {
             llmConfiguration.recordProviderFailure("The provider returned a plan review in an unreadable format.")
+            throw LLMProviderError.invalidResponse
+        }
+    }
+
+    private func statusReport(
+        request: BeadStatusReportRequest,
+        store: BoardStore
+    ) async throws -> BeadStatusReportResponse {
+        let status = llmConfiguration.status
+        guard status.isAvailable else {
+            throw LLMProviderError.unavailable(status.message)
+        }
+
+        let configuration = llmConfiguration.configuration
+        guard let endpointURL = configuration.endpointURL else {
+            throw LLMProviderError.unavailable("The LLM endpoint URL is invalid.")
+        }
+
+        let prompt = try statusReportPrompt(request: request, store: store)
+        let llmResponse = try await requestLLMJSON(
+            endpointURL: endpointURL.appending(path: "chat/completions"),
+            configuration: configuration,
+            userPrompt: prompt
+        )
+
+        do {
+            let payload = try BeadsJSON.decoder.decode(LLMStatusReportPayload.self, from: llmResponse)
+            return BeadStatusReportResponse(
+                title: payload.title,
+                summary: payload.summary,
+                sections: payload.sections,
+                generatedAt: Date()
+            )
+        } catch {
+            llmConfiguration.recordProviderFailure("The provider returned a status report in an unreadable format.")
             throw LLMProviderError.invalidResponse
         }
     }
@@ -512,6 +562,78 @@ final class BeadsHTTPServer: ObservableObject {
         """
     }
 
+    private func statusReportPrompt(request: BeadStatusReportRequest, store: BoardStore) throws -> String {
+        let board = request.boardID.flatMap { boardID in
+            store.boards.first { $0.id == boardID }
+        } ?? store.selectedBoard
+        guard let board else {
+            throw LLMProviderError.unavailable("No board context is available.")
+        }
+
+        let root = request.beadID.flatMap { beadID in
+            board.columns.flatMap(\.beads).first { $0.id == beadID }
+        }
+        if request.scope == .subtree && root == nil {
+            throw LLMProviderError.unavailable("The selected parent bead no longer exists.")
+        }
+
+        let reportBeads: [Bead]
+        switch request.scope {
+        case .board:
+            reportBeads = board.columns.flatMap(\.beads).filter { !$0.isArchived }
+        case .subtree:
+            reportBeads = root.map { reviewBeads(root: $0, board: board, scope: .subtree) } ?? []
+        }
+
+        let statusByBeadID = Dictionary(
+            uniqueKeysWithValues: board.columns.flatMap { column in
+                column.beads.map { bead in (bead.id, bead.status ?? column.name) }
+            }
+        )
+        let context = reportBeads.map { bead in
+            [
+                "id=\(bead.relationshipID)",
+                "title=\(bead.title)",
+                "type=\(bead.issueType ?? bead.sourceType.displayName)",
+                "status=\(statusByBeadID[bead.id] ?? "Unknown")",
+                "priority=\(bead.priority.rawValue)",
+                "blocked=\(bead.isBlocked)",
+                "stale=\(bead.isStale)",
+                "parent=\(bead.parentBeadsID ?? "none")",
+                "children=\(bead.childBeadsIDs.joined(separator: ", "))",
+                "dependencies=\(bead.dependencyBeadsIDs.joined(separator: ", "))",
+                "summary=\(bead.summary)"
+            ].joined(separator: " | ")
+        }.joined(separator: "\n")
+
+        return """
+        Generate a terse operational project status report from canonical beads state. Distinguish completed, active, blocked, stale, and unplanned or missing work. Focus on decisions, risks, likely next actions, and work sequencing.
+
+        Return JSON with exactly this shape:
+        {
+          "title": "short report title",
+          "summary": "2-4 sentence executive summary",
+          "sections": [
+            {
+              "title": "Completed|Active|Blocked|Stale|Unplanned Work|Risks|Next Actions",
+              "items": ["terse bullet without markdown"]
+            }
+          ]
+        }
+
+        Include sections only when useful. Keep every item specific and tied to a bead or decision when possible. Do not propose state changes.
+
+        Board: \(board.name)
+        Repository: \(board.repositoryName)
+        Scope: \(request.scope.rawValue)
+        Root: \(root.map(\.relationshipID) ?? "board")
+        Columns: \(board.columns.map(\.name).joined(separator: ", "))
+
+        Beads:
+        \(context.isEmpty ? "No active beads." : context)
+        """
+    }
+
     private func reviewBeads(root: Bead, board: Board, scope: BeadPlanReviewScope) -> [Bead] {
         guard scope == .subtree else { return [root] }
 
@@ -566,7 +688,7 @@ final class BeadsHTTPServer: ObservableObject {
                 "board-snapshot-replace",
                 "beads-relationship-metadata",
                 "server-side-llm-status"
-            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance", "ai-bead-field-suggestions", "ai-plan-review"] : []),
+            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance", "ai-bead-field-suggestions", "ai-plan-review", "ai-status-report"] : []),
             llmStatus: llmConfiguration.status
         )
     }
@@ -619,6 +741,12 @@ private struct LLMPlanReviewPayload: Decodable {
     var message: String
     var findings: [BeadPlanReviewFinding]
     var changes: [BeadPlanReviewChange]
+}
+
+private struct LLMStatusReportPayload: Decodable {
+    var title: String
+    var summary: String
+    var sections: [BeadStatusReportSection]
 }
 
 private struct OpenAIChatRequest: Encodable {

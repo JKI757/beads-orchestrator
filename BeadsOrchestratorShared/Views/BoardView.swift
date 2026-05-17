@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 struct BoardView: View {
     @EnvironmentObject private var store: BoardStore
@@ -164,6 +169,8 @@ private struct BoardHeader: View {
                     .padding(.vertical, 4)
                     .background(Color.orange.opacity(0.15), in: Capsule())
             }
+
+            StatusReportButton(board: board, compact: true)
         }
         .padding(.horizontal, isCompact ? 12 : 16)
         .padding(.vertical, 8)
@@ -176,6 +183,218 @@ private struct BoardHeader: View {
         }
         #else
         .background(.bar)
+        #endif
+    }
+}
+
+struct StatusReportButton: View {
+    @EnvironmentObject private var store: BoardStore
+    #if os(macOS)
+    @EnvironmentObject private var server: BeadsHTTPServer
+    #endif
+
+    let board: Board
+    var bead: Bead?
+    var scope: BeadStatusReportScope = .board
+    var compact = false
+
+    @State private var showingReport = false
+    @State private var isGenerating = false
+    @State private var report: BeadStatusReportResponse?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Button {
+            showingReport = true
+            generate()
+        } label: {
+            if compact {
+                Image(systemName: "chart.bar.doc.horizontal")
+            } else {
+                Label("Status Report", systemImage: "chart.bar.doc.horizontal")
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(isGenerating)
+        .help("Generate Status Report")
+        .sheet(isPresented: $showingReport) {
+            StatusReportSheet(
+                title: scope == .board ? board.name : bead?.title ?? board.name,
+                scope: scope,
+                isGenerating: isGenerating,
+                report: report,
+                errorMessage: errorMessage,
+                regenerate: generate,
+                copyReport: copyReport,
+                saveToNotes: bead == nil ? nil : saveToNotes
+            )
+        }
+    }
+
+    private func generate() {
+        guard !isGenerating else { return }
+        isGenerating = true
+        errorMessage = nil
+        Task {
+            do {
+                let request = BeadStatusReportRequest(boardID: board.id, beadID: bead?.id, scope: scope)
+                let generatedReport: BeadStatusReportResponse
+                #if os(macOS)
+                generatedReport = try await server.statusReport(request: request)
+                #else
+                generatedReport = try await store.statusReport(for: bead?.id, scope: scope)
+                #endif
+                report = generatedReport
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isGenerating = false
+        }
+    }
+
+    private func copyReport() {
+        guard let report else { return }
+        let text = formatted(report: report)
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #elseif os(iOS)
+        UIPasteboard.general.string = text
+        #endif
+    }
+
+    private func saveToNotes() {
+        guard
+            let bead,
+            let report
+        else { return }
+
+        let target = store.bead(beadsID: bead.relationshipID) ?? bead
+        var draft = BeadDraft(bead: target)
+        let existingNotes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.notes = [existingNotes, formatted(report: report)]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        store.updateBead(target.id, with: draft)
+    }
+
+    private func formatted(report: BeadStatusReportResponse) -> String {
+        var lines = [
+            report.title,
+            "",
+            report.summary
+        ]
+
+        for section in report.sections where !section.items.isEmpty {
+            lines.append("")
+            lines.append(section.title)
+            lines.append(contentsOf: section.items.map { "- \($0)" })
+        }
+
+        lines.append("")
+        lines.append("Generated \(report.generatedAt.formatted(date: .abbreviated, time: .shortened))")
+        return lines.joined(separator: "\n")
+    }
+}
+
+private struct StatusReportSheet: View {
+    let title: String
+    let scope: BeadStatusReportScope
+    let isGenerating: Bool
+    let report: BeadStatusReportResponse?
+    let errorMessage: String?
+    let regenerate: () -> Void
+    let copyReport: () -> Void
+    let saveToNotes: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Status Report")
+                        .font(.title3.weight(.semibold))
+                    Text(scope == .board ? title : "Subtree: \(title)")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button {
+                    regenerate()
+                } label: {
+                    Label("Regenerate", systemImage: "arrow.clockwise")
+                }
+                .disabled(isGenerating)
+
+                Button {
+                    copyReport()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .disabled(report == nil)
+
+                if let saveToNotes {
+                    Button {
+                        saveToNotes()
+                    } label: {
+                        Label("Save to Notes", systemImage: "square.and.pencil")
+                    }
+                    .disabled(report == nil)
+                }
+            }
+            .padding()
+
+            Divider()
+
+            Group {
+                if isGenerating {
+                    ProgressView("Generating report")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage {
+                    ContentUnavailableView("Report Unavailable", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let report {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(report.title)
+                                    .font(.title3.weight(.semibold))
+                                Text(report.summary)
+                                    .font(.body)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            ForEach(report.sections) { section in
+                                if !section.items.isEmpty {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(section.title)
+                                            .font(.headline)
+                                        ForEach(section.items, id: \.self) { item in
+                                            Label(item, systemImage: "circle.fill")
+                                                .font(.callout)
+                                                .labelStyle(.titleAndIcon)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                    }
+                } else {
+                    ContentUnavailableView("No Report", systemImage: "chart.bar.doc.horizontal")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(width: 620, height: 560)
+        #else
+        .presentationDetents([.medium, .large])
         #endif
     }
 }
@@ -443,6 +662,8 @@ private struct HierarchyHeader: View {
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
                 .background(.quaternary, in: Capsule())
+
+            StatusReportButton(board: board, compact: true)
         }
         .padding(.horizontal, isCompact ? 16 : 18)
         .padding(.vertical, isCompact ? 10 : 12)
