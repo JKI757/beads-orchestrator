@@ -168,14 +168,15 @@ type AIPMAutomationSettings struct {
 }
 
 type AIPMState struct {
-	Settings       AIPMAutomationSettings `json:"settings"`
-	LastRunAt      *time.Time             `json:"lastRunAt,omitempty"`
-	LastRunSummary *string                `json:"lastRunSummary,omitempty"`
-	LastRunError   *string                `json:"lastRunError,omitempty"`
-	NextRunAt      *time.Time             `json:"nextRunAt,omitempty"`
-	Proposals      []AIPMDecisionProposal `json:"proposals"`
-	Reports        []AIPMReportSnapshot   `json:"reports"`
-	UpdatedAt      time.Time              `json:"updatedAt"`
+	Settings           AIPMAutomationSettings   `json:"settings"`
+	LastRunAt          *time.Time               `json:"lastRunAt,omitempty"`
+	LastRunSummary     *string                  `json:"lastRunSummary,omitempty"`
+	LastRunError       *string                  `json:"lastRunError,omitempty"`
+	NextRunAt          *time.Time               `json:"nextRunAt,omitempty"`
+	LatestIntelligence *AIPMProjectIntelligence `json:"latestIntelligence,omitempty"`
+	Proposals          []AIPMDecisionProposal   `json:"proposals"`
+	Reports            []AIPMReportSnapshot     `json:"reports"`
+	UpdatedAt          time.Time                `json:"updatedAt"`
 }
 
 type AIPMDecisionProposal struct {
@@ -196,6 +197,28 @@ type AIPMReportSnapshot struct {
 	Summary     string                    `json:"summary"`
 	Sections    []BeadStatusReportSection `json:"sections"`
 	GeneratedAt time.Time                 `json:"generatedAt"`
+}
+
+type AIPMProjectIntelligence struct {
+	BoardID          string              `json:"boardID"`
+	BoardName        string              `json:"boardName"`
+	TotalActiveBeads int                 `json:"totalActiveBeads"`
+	BlockedBeads     int                 `json:"blockedBeads"`
+	StaleBeads       int                 `json:"staleBeads"`
+	UrgentBeads      int                 `json:"urgentBeads"`
+	OrphanedChildren int                 `json:"orphanedChildren"`
+	DependencyIssues int                 `json:"dependencyIssues"`
+	Signals          []AIPMProjectSignal `json:"signals"`
+	GeneratedAt      time.Time           `json:"generatedAt"`
+}
+
+type AIPMProjectSignal struct {
+	ID       string   `json:"id"`
+	Severity string   `json:"severity"`
+	Category string   `json:"category"`
+	Title    string   `json:"title"`
+	Detail   string   `json:"detail"`
+	BeadIDs  []string `json:"beadIDs"`
 }
 
 type AIPMRunRequest struct {

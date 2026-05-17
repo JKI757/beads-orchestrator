@@ -1063,6 +1063,15 @@ private struct AIPMDashboardSheet: View {
                     }
                 }
 
+                Section("Project Intelligence") {
+                    if let intelligence = pmState.state.latestIntelligence {
+                        AIPMProjectIntelligenceView(intelligence: intelligence)
+                    } else {
+                        Text("No project intelligence generated yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Pending Decisions") {
                     if pmState.state.pendingProposals.isEmpty {
                         Text("No pending decisions.")
@@ -1615,6 +1624,15 @@ private struct RemoteAIPMDashboardSheet: View {
                     }
                 }
 
+                Section("Project Intelligence") {
+                    if let state = store.remoteAIPMState, let intelligence = state.latestIntelligence {
+                        AIPMProjectIntelligenceView(intelligence: intelligence)
+                    } else {
+                        Text("No project intelligence generated yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section {
                     Button {
                         Task { await refresh() }
@@ -1767,6 +1785,61 @@ private struct RemoteAIPMReportRow: View {
     }
 }
 #endif
+
+private struct AIPMProjectIntelligenceView: View {
+    let intelligence: AIPMProjectIntelligenceSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                LabeledContent("Active", value: "\(intelligence.totalActiveBeads)")
+                LabeledContent("Blocked", value: "\(intelligence.blockedBeads)")
+                LabeledContent("Stale", value: "\(intelligence.staleBeads)")
+            }
+            .font(.caption)
+
+            Text("Generated \(intelligence.generatedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(intelligence.signals.prefix(6)) { signal in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(signal.severity.displayName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(color(for: signal.severity))
+                        Text(signal.category.displayName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(signal.title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(signal.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !signal.beadIDs.isEmpty {
+                        Text(signal.beadIDs.prefix(6).joined(separator: ", "))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func color(for severity: AIPMProjectSignalSeverity) -> Color {
+        switch severity {
+        case .info:
+            .secondary
+        case .warning:
+            .orange
+        case .critical:
+            .red
+        }
+    }
+}
 
 private enum BoardEditorMode: Equatable {
     case create

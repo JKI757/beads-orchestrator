@@ -293,6 +293,7 @@ struct AIPMState: Codable, Equatable {
     var lastRunSummary: String?
     var lastRunError: String?
     var nextRunAt: Date?
+    var latestIntelligence: AIPMProjectIntelligenceSummary?
     var proposals: [AIPMDecisionProposal]
     var reports: [AIPMReportSnapshot]
     var updatedAt: Date
@@ -303,6 +304,7 @@ struct AIPMState: Codable, Equatable {
         lastRunSummary: String? = nil,
         lastRunError: String? = nil,
         nextRunAt: Date? = nil,
+        latestIntelligence: AIPMProjectIntelligenceSummary? = nil,
         proposals: [AIPMDecisionProposal] = [],
         reports: [AIPMReportSnapshot] = [],
         updatedAt: Date = .now
@@ -312,6 +314,7 @@ struct AIPMState: Codable, Equatable {
         self.lastRunSummary = lastRunSummary
         self.lastRunError = lastRunError
         self.nextRunAt = nextRunAt
+        self.latestIntelligence = latestIntelligence
         self.proposals = proposals
         self.reports = reports
         self.updatedAt = updatedAt
@@ -412,6 +415,76 @@ struct AIPMReportSnapshot: Codable, Equatable, Identifiable {
         self.summary = summary
         self.sections = sections
         self.generatedAt = generatedAt
+    }
+}
+
+struct AIPMProjectIntelligenceSummary: Codable, Equatable {
+    var boardID: Board.ID
+    var boardName: String
+    var totalActiveBeads: Int
+    var blockedBeads: Int
+    var staleBeads: Int
+    var urgentBeads: Int
+    var orphanedChildren: Int
+    var dependencyIssues: Int
+    var signals: [AIPMProjectSignal]
+    var generatedAt: Date
+}
+
+struct AIPMProjectSignal: Codable, Equatable, Identifiable {
+    var id: UUID
+    var severity: AIPMProjectSignalSeverity
+    var category: AIPMProjectSignalCategory
+    var title: String
+    var detail: String
+    var beadIDs: [String]
+
+    init(
+        id: UUID = UUID(),
+        severity: AIPMProjectSignalSeverity,
+        category: AIPMProjectSignalCategory,
+        title: String,
+        detail: String,
+        beadIDs: [String] = []
+    ) {
+        self.id = id
+        self.severity = severity
+        self.category = category
+        self.title = title
+        self.detail = detail
+        self.beadIDs = beadIDs
+    }
+}
+
+enum AIPMProjectSignalSeverity: String, Codable, CaseIterable, Identifiable {
+    case info
+    case warning
+    case critical
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        rawValue.capitalized
+    }
+}
+
+enum AIPMProjectSignalCategory: String, Codable, CaseIterable, Identifiable {
+    case blocked
+    case stale
+    case workload
+    case hierarchy
+    case dependency
+    case quality
+    case health
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        rawValue.capitalized
     }
 }
 
@@ -736,11 +809,17 @@ final class AIPMStateStore: ObservableObject {
         persist()
     }
 
-    func recordRun(summary: String, proposals: [AIPMDecisionProposal], report: AIPMReportSnapshot?) {
+    func recordRun(
+        summary: String,
+        proposals: [AIPMDecisionProposal],
+        report: AIPMReportSnapshot?,
+        intelligence: AIPMProjectIntelligenceSummary?
+    ) {
         var nextState = state
         nextState.lastRunAt = .now
         nextState.lastRunSummary = summary
         nextState.lastRunError = nil
+        nextState.latestIntelligence = intelligence
         nextState.proposals = Array((proposals + nextState.proposals).prefix(40))
         if let report {
             nextState.reports = Array(([report] + nextState.reports).prefix(20))

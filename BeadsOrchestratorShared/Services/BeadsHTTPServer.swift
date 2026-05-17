@@ -463,7 +463,8 @@ final class BeadsHTTPServer: ObservableObject {
             throw LLMProviderError.unavailable("The LLM endpoint URL is invalid.")
         }
 
-        let prompt = try aiPMPrompt(request: request, settings: settings, store: store)
+        let intelligence = try projectIntelligenceSummary(request: request, store: store)
+        let prompt = try aiPMPrompt(request: request, settings: settings, store: store, intelligence: intelligence)
         let llmResponse = try await requestLLMJSON(
             endpointURL: endpointURL.appending(path: "chat/completions"),
             configuration: configuration,
@@ -491,7 +492,12 @@ final class BeadsHTTPServer: ObservableObject {
                     sections: report.sections
                 )
             }
-            aiPMState.recordRun(summary: payload.summary, proposals: proposals, report: report)
+            aiPMState.recordRun(
+                summary: payload.summary,
+                proposals: proposals,
+                report: report,
+                intelligence: intelligence
+            )
             return aiPMState.state
         } catch {
             llmConfiguration.recordProviderFailure("The provider returned an AI PM run in an unreadable format.")
@@ -768,7 +774,12 @@ final class BeadsHTTPServer: ObservableObject {
         """
     }
 
-    private func aiPMPrompt(request: AIPMRunRequest, settings: AIPMAutomationSettings, store: BoardStore) throws -> String {
+    private func aiPMPrompt(
+        request: AIPMRunRequest,
+        settings: AIPMAutomationSettings,
+        store: BoardStore,
+        intelligence: AIPMProjectIntelligenceSummary
+    ) throws -> String {
         let board = request.boardID.flatMap { boardID in
             store.boards.first { $0.id == boardID }
         } ?? store.selectedBoard
@@ -871,8 +882,139 @@ final class BeadsHTTPServer: ObservableObject {
         Pending decisions already surfaced:
         \(pendingDecisions.isEmpty ? "None" : pendingDecisions)
 
+        Deterministic project intelligence:
+        \(projectIntelligencePromptContext(intelligence))
+
         Beads:
         \(context.isEmpty ? "No active beads." : context)
+        """
+    }
+
+    private func projectIntelligenceSummary(request: AIPMRunRequest, store: BoardStore) throws -> AIPMProjectIntelligenceSummary {
+        let board = request.boardID.flatMap { boardID in
+            store.boards.first { $0.id == boardID }
+        } ?? store.selectedBoard
+        guard let board else {
+            throw LLMProviderError.unavailable("No board context is available.")
+        }
+
+        let activeBeads = board.columns.flatMap(\.beads).filter { !$0.isArchived }
+        let beadsByRelationshipID = Dictionary(
+            activeBeads.map { ($0.relationshipID, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+        let blocked = activeBeads.filter(\.isBlocked)
+        let stale = activeBeads.filter(\.isStale)
+        let urgent = activeBeads.filter { $0.priority == .urgent }
+        let orphanedChildren = activeBeads.filter { bead in
+            bead.parentBeadsID.map { beadsByRelationshipID[$0] == nil } ?? false
+        }
+        let dependencyIssueBeads = activeBeads.filter { bead in
+            bead.dependencyBeadsIDs.contains { beadsByRelationshipID[$0] == nil || $0 == bead.relationshipID }
+        }
+
+        var signals: [AIPMProjectSignal] = []
+        if activeBeads.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .info,
+                category: .health,
+                title: "Board has no active beads",
+                detail: "There is no active work for the AI PM to analyze."
+            ))
+        }
+        if !blocked.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: blocked.contains { $0.priority == .urgent || $0.priority == .high } ? .critical : .warning,
+                category: .blocked,
+                title: "\(blocked.count) blocked bead\(blocked.count == 1 ? "" : "s")",
+                detail: "Blocked work needs an owner decision or dependency resolution.",
+                beadIDs: blocked.map(\.relationshipID)
+            ))
+        }
+        if !stale.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: stale.count >= 3 ? .warning : .info,
+                category: .stale,
+                title: "\(stale.count) stale bead\(stale.count == 1 ? "" : "s")",
+                detail: "Stale work should be refreshed, closed, or moved out of active planning.",
+                beadIDs: stale.map(\.relationshipID)
+            ))
+        }
+        if !urgent.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: urgent.count >= 3 ? .warning : .info,
+                category: .workload,
+                title: "\(urgent.count) urgent bead\(urgent.count == 1 ? "" : "s")",
+                detail: "Too many urgent items can hide the real priority order.",
+                beadIDs: urgent.map(\.relationshipID)
+            ))
+        }
+        if !orphanedChildren.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .warning,
+                category: .hierarchy,
+                title: "\(orphanedChildren.count) bead\(orphanedChildren.count == 1 ? "" : "s") with missing parent",
+                detail: "Parent references should point to active beads so hierarchy views and planning prompts stay accurate.",
+                beadIDs: orphanedChildren.map(\.relationshipID)
+            ))
+        }
+        if !dependencyIssueBeads.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .warning,
+                category: .dependency,
+                title: "\(dependencyIssueBeads.count) bead\(dependencyIssueBeads.count == 1 ? "" : "s") with dependency issues",
+                detail: "Dependencies should point to active beads and should not point back to the same bead.",
+                beadIDs: dependencyIssueBeads.map(\.relationshipID)
+            ))
+        }
+        if signals.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .info,
+                category: .health,
+                title: "No deterministic PM risks detected",
+                detail: "The board has active work and no blocked, stale, orphaned, or invalid dependency signals."
+            ))
+        }
+
+        return AIPMProjectIntelligenceSummary(
+            boardID: board.id,
+            boardName: board.name,
+            totalActiveBeads: activeBeads.count,
+            blockedBeads: blocked.count,
+            staleBeads: stale.count,
+            urgentBeads: urgent.count,
+            orphanedChildren: orphanedChildren.count,
+            dependencyIssues: dependencyIssueBeads.count,
+            signals: signals,
+            generatedAt: .now
+        )
+    }
+
+    private func projectIntelligencePromptContext(_ intelligence: AIPMProjectIntelligenceSummary) -> String {
+        let metrics = [
+            "active=\(intelligence.totalActiveBeads)",
+            "blocked=\(intelligence.blockedBeads)",
+            "stale=\(intelligence.staleBeads)",
+            "urgent=\(intelligence.urgentBeads)",
+            "orphanedChildren=\(intelligence.orphanedChildren)",
+            "dependencyIssues=\(intelligence.dependencyIssues)"
+        ].joined(separator: " | ")
+        let signals = intelligence.signals.map { signal in
+            var parts = [
+                "\(signal.severity.rawValue)/\(signal.category.rawValue)",
+                signal.title,
+                signal.detail
+            ]
+            if !signal.beadIDs.isEmpty {
+                parts.append("beads=\(signal.beadIDs.joined(separator: ", "))")
+            }
+            return parts.joined(separator: " | ")
+        }.joined(separator: "\n")
+        return """
+        board=\(intelligence.boardName)
+        metrics=\(metrics)
+        signals:
+        \(signals)
         """
     }
 
