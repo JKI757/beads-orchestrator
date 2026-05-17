@@ -212,6 +212,196 @@ struct BeadStatusReportSection: Codable, Equatable, Identifiable {
     }
 }
 
+struct AIPMAutomationSettings: Codable, Equatable {
+    var isEnabled: Bool
+    var cadence: AIPMCadence
+    var autonomyLevel: AIPMAutonomyLevel
+    var reviewsBacklog: Bool
+    var generatesReports: Bool
+    var maximumProposals: Int
+
+    init(
+        isEnabled: Bool = true,
+        cadence: AIPMCadence = .manual,
+        autonomyLevel: AIPMAutonomyLevel = .surfaceDecisions,
+        reviewsBacklog: Bool = true,
+        generatesReports: Bool = true,
+        maximumProposals: Int = 8
+    ) {
+        self.isEnabled = isEnabled
+        self.cadence = cadence
+        self.autonomyLevel = autonomyLevel
+        self.reviewsBacklog = reviewsBacklog
+        self.generatesReports = generatesReports
+        self.maximumProposals = maximumProposals
+    }
+}
+
+enum AIPMCadence: String, Codable, CaseIterable, Identifiable {
+    case manual
+    case hourly
+    case daily
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .manual:
+            "Manual"
+        case .hourly:
+            "Hourly"
+        case .daily:
+            "Daily"
+        }
+    }
+}
+
+enum AIPMAutonomyLevel: String, Codable, CaseIterable, Identifiable {
+    case surfaceDecisions
+    case autonomousProposals
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        switch self {
+        case .surfaceDecisions:
+            "Surface Decisions"
+        case .autonomousProposals:
+            "Autonomous Proposals"
+        }
+    }
+}
+
+struct AIPMState: Codable, Equatable {
+    var settings: AIPMAutomationSettings
+    var lastRunAt: Date?
+    var lastRunSummary: String?
+    var proposals: [AIPMDecisionProposal]
+    var reports: [AIPMReportSnapshot]
+    var updatedAt: Date
+
+    init(
+        settings: AIPMAutomationSettings = AIPMAutomationSettings(),
+        lastRunAt: Date? = nil,
+        lastRunSummary: String? = nil,
+        proposals: [AIPMDecisionProposal] = [],
+        reports: [AIPMReportSnapshot] = [],
+        updatedAt: Date = .now
+    ) {
+        self.settings = settings
+        self.lastRunAt = lastRunAt
+        self.lastRunSummary = lastRunSummary
+        self.proposals = proposals
+        self.reports = reports
+        self.updatedAt = updatedAt
+    }
+
+    var pendingProposals: [AIPMDecisionProposal] {
+        proposals.filter { $0.status == .pending }
+    }
+}
+
+struct AIPMDecisionProposal: Codable, Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var summary: String
+    var category: AIPMProposalCategory
+    var risk: AIPMProposalRisk
+    var rationale: String
+    var changes: [BeadPlanReviewChange]
+    var status: AIPMProposalStatus
+    var createdAt: Date
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        summary: String,
+        category: AIPMProposalCategory,
+        risk: AIPMProposalRisk,
+        rationale: String,
+        changes: [BeadPlanReviewChange] = [],
+        status: AIPMProposalStatus = .pending,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.category = category
+        self.risk = risk
+        self.rationale = rationale
+        self.changes = changes
+        self.status = status
+        self.createdAt = createdAt
+    }
+}
+
+enum AIPMProposalCategory: String, Codable, CaseIterable, Identifiable {
+    case backlog
+    case planning
+    case risk
+    case milestone
+    case decision
+    case handoff
+
+    var id: String {
+        rawValue
+    }
+
+    var displayName: String {
+        rawValue.capitalized
+    }
+}
+
+enum AIPMProposalRisk: String, Codable, CaseIterable, Identifiable {
+    case low
+    case medium
+    case high
+
+    var id: String {
+        rawValue
+    }
+}
+
+enum AIPMProposalStatus: String, Codable, CaseIterable, Identifiable {
+    case pending
+    case accepted
+    case dismissed
+
+    var id: String {
+        rawValue
+    }
+}
+
+struct AIPMReportSnapshot: Codable, Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var summary: String
+    var sections: [BeadStatusReportSection]
+    var generatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        summary: String,
+        sections: [BeadStatusReportSection],
+        generatedAt: Date = .now
+    ) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.sections = sections
+        self.generatedAt = generatedAt
+    }
+}
+
+struct AIPMRunRequest: Codable, Equatable {
+    var boardID: Board.ID?
+}
+
 enum BeadSuggestionField: String, Codable, CaseIterable, Identifiable {
     case title
     case summary
@@ -503,6 +693,81 @@ final class LLMServerConfigurationStore: ObservableObject {
         return root
             .appendingPathComponent("Beads-Orchestrator", isDirectory: true)
             .appendingPathComponent("llm-configuration.json")
+    }
+}
+#endif
+
+#if os(macOS)
+@MainActor
+final class AIPMStateStore: ObservableObject {
+    @Published private(set) var state: AIPMState
+
+    private let persistenceURL: URL
+
+    init(persistenceURL: URL? = nil) {
+        let persistenceURL = persistenceURL ?? Self.defaultPersistenceURL
+        self.persistenceURL = persistenceURL
+        self.state = Self.loadState(from: persistenceURL) ?? AIPMState()
+    }
+
+    func saveSettings(_ settings: AIPMAutomationSettings) {
+        var nextState = state
+        nextState.settings = sanitized(settings)
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    func recordRun(summary: String, proposals: [AIPMDecisionProposal], report: AIPMReportSnapshot?) {
+        var nextState = state
+        nextState.lastRunAt = .now
+        nextState.lastRunSummary = summary
+        nextState.proposals = Array((proposals + nextState.proposals).prefix(40))
+        if let report {
+            nextState.reports = Array(([report] + nextState.reports).prefix(20))
+        }
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    func updateProposal(_ proposalID: AIPMDecisionProposal.ID, status: AIPMProposalStatus) {
+        var nextState = state
+        guard let index = nextState.proposals.firstIndex(where: { $0.id == proposalID }) else { return }
+        nextState.proposals[index].status = status
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    private func sanitized(_ settings: AIPMAutomationSettings) -> AIPMAutomationSettings {
+        var settings = settings
+        settings.maximumProposals = min(max(settings.maximumProposals, 1), 20)
+        return settings
+    }
+
+    private func persist() {
+        do {
+            let directory = persistenceURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try BeadsJSON.encoder.encode(state)
+            try data.write(to: persistenceURL, options: [.atomic])
+        } catch {
+            // Keep the in-memory PM state active if disk persistence fails.
+        }
+    }
+
+    private static func loadState(from url: URL) -> AIPMState? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? BeadsJSON.decoder.decode(AIPMState.self, from: data)
+    }
+
+    private static var defaultPersistenceURL: URL {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return root
+            .appendingPathComponent("Beads-Orchestrator", isDirectory: true)
+            .appendingPathComponent("ai-pm-state.json")
     }
 }
 #endif

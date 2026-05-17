@@ -44,6 +44,18 @@ struct BeadsServerClient {
         try await post("ai/status-report", body: reportRequest, as: BeadStatusReportResponse.self)
     }
 
+    func aiPMState() async throws -> AIPMState {
+        try await get("ai/pm/state", as: AIPMState.self)
+    }
+
+    func updateAIPMSettings(_ settings: AIPMAutomationSettings) async throws -> AIPMState {
+        try await put("ai/pm/settings", body: settings, as: AIPMState.self)
+    }
+
+    func runAIPM(_ runRequest: AIPMRunRequest = AIPMRunRequest(boardID: nil)) async throws -> AIPMState {
+        try await post("ai/pm/run", body: runRequest, as: AIPMState.self)
+    }
+
     private func get<Value: Decodable>(_ path: String, as type: Value.Type, requiresAuth: Bool = true) async throws -> Value {
         var request = URLRequest(url: endpoint(path))
         if requiresAuth {
@@ -62,6 +74,22 @@ struct BeadsServerClient {
     ) async throws -> Value {
         var request = URLRequest(url: endpoint(path))
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try authorize(&request)
+        request.httpBody = try BeadsJSON.encoder.encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        try validate(data: data, response: response)
+        return try BeadsJSON.decoder.decode(type, from: data)
+    }
+
+    private func put<Body: Encodable, Value: Decodable>(
+        _ path: String,
+        body: Body,
+        as type: Value.Type
+    ) async throws -> Value {
+        var request = URLRequest(url: endpoint(path))
+        request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try authorize(&request)
         request.httpBody = try BeadsJSON.encoder.encode(body)

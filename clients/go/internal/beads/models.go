@@ -157,3 +157,45 @@ type BeadStatusReportSection struct {
 	Title string   `json:"title"`
 	Items []string `json:"items"`
 }
+
+type AIPMAutomationSettings struct {
+	IsEnabled        bool   `json:"isEnabled"`
+	Cadence          string `json:"cadence"`
+	AutonomyLevel    string `json:"autonomyLevel"`
+	ReviewsBacklog   bool   `json:"reviewsBacklog"`
+	GeneratesReports bool   `json:"generatesReports"`
+	MaximumProposals int    `json:"maximumProposals"`
+}
+
+type AIPMState struct {
+	Settings       AIPMAutomationSettings `json:"settings"`
+	LastRunAt      *time.Time             `json:"lastRunAt,omitempty"`
+	LastRunSummary *string                `json:"lastRunSummary,omitempty"`
+	Proposals      []AIPMDecisionProposal `json:"proposals"`
+	Reports        []AIPMReportSnapshot   `json:"reports"`
+	UpdatedAt      time.Time              `json:"updatedAt"`
+}
+
+type AIPMDecisionProposal struct {
+	ID        string                 `json:"id"`
+	Title     string                 `json:"title"`
+	Summary   string                 `json:"summary"`
+	Category  string                 `json:"category"`
+	Risk      string                 `json:"risk"`
+	Rationale string                 `json:"rationale"`
+	Changes   []BeadPlanReviewChange `json:"changes"`
+	Status    string                 `json:"status"`
+	CreatedAt time.Time              `json:"createdAt"`
+}
+
+type AIPMReportSnapshot struct {
+	ID          string                    `json:"id"`
+	Title       string                    `json:"title"`
+	Summary     string                    `json:"summary"`
+	Sections    []BeadStatusReportSection `json:"sections"`
+	GeneratedAt time.Time                 `json:"generatedAt"`
+}
+
+type AIPMRunRequest struct {
+	BoardID *string `json:"boardID,omitempty"`
+}

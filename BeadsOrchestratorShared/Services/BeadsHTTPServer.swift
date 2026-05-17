@@ -9,18 +9,22 @@ final class BeadsHTTPServer: ObservableObject {
     @Published private(set) var listeningURLString = ""
     @Published private(set) var pairingToken = UUID().uuidString
     let llmConfiguration: LLMServerConfigurationStore
+    let aiPMState: AIPMStateStore
 
     private weak var store: BoardStore?
+    private var automationTask: Task<Void, Never>?
     private var socketFD: Int32 = -1
     private let queue = DispatchQueue(label: "com.beadsorchestrator.http-server", qos: .userInitiated)
     private let port: UInt16 = 8787
 
-    init(llmConfiguration: LLMServerConfigurationStore? = nil) {
+    init(llmConfiguration: LLMServerConfigurationStore? = nil, aiPMState: AIPMStateStore? = nil) {
         self.llmConfiguration = llmConfiguration ?? LLMServerConfigurationStore()
+        self.aiPMState = aiPMState ?? AIPMStateStore()
     }
 
     func configure(store: BoardStore) {
         self.store = store
+        restartAutomationLoop()
     }
 
     var pairingPayload: BeadsPairingPayload? {
@@ -102,6 +106,8 @@ final class BeadsHTTPServer: ObservableObject {
         isRunning = false
         listeningURLString = ""
         statusMessage = "Server stopped"
+        automationTask?.cancel()
+        automationTask = nil
     }
 
     private nonisolated func acceptLoop(socketFD: Int32) {
@@ -224,6 +230,30 @@ final class BeadsHTTPServer: ObservableObject {
                 let response = try await statusReport(request: request, store: store)
                 return try jsonResponse(response)
 
+            case ("GET", "/ai/pm/state"):
+                guard isAuthorized(request) else {
+                    return httpResponse(status: 401, body: Data())
+                }
+                return try jsonResponse(aiPMState.state)
+
+            case ("PUT", "/ai/pm/settings"):
+                guard isAuthorized(request) else {
+                    return httpResponse(status: 401, body: Data())
+                }
+                let settings = try BeadsJSON.decoder.decode(AIPMAutomationSettings.self, from: request.body)
+                saveAIPMSettings(settings)
+                return try jsonResponse(aiPMState.state)
+
+            case ("POST", "/ai/pm/run"):
+                guard isAuthorized(request) else {
+                    return httpResponse(status: 401, body: Data())
+                }
+                let runRequest = request.body.isEmpty
+                    ? AIPMRunRequest(boardID: nil)
+                    : try BeadsJSON.decoder.decode(AIPMRunRequest.self, from: request.body)
+                let response = try await runAIPM(request: runRequest, store: store)
+                return try jsonResponse(response)
+
             case ("PUT", "/boards"):
                 guard isAuthorized(request) else {
                     return httpResponse(status: 401, body: Data())
@@ -259,6 +289,58 @@ final class BeadsHTTPServer: ObservableObject {
             throw LLMProviderError.unavailable("No board store is attached to the server.")
         }
         return try await statusReport(request: request, store: store)
+    }
+
+    func saveAIPMSettings(_ settings: AIPMAutomationSettings) {
+        aiPMState.saveSettings(settings)
+        restartAutomationLoop()
+    }
+
+    func runAIPM(request: AIPMRunRequest = AIPMRunRequest(boardID: nil)) async throws -> AIPMState {
+        guard let store else {
+            throw LLMProviderError.unavailable("No board store is attached to the server.")
+        }
+        return try await runAIPM(request: request, store: store)
+    }
+
+    private func restartAutomationLoop() {
+        automationTask?.cancel()
+        automationTask = nil
+
+        let settings = aiPMState.state.settings
+        guard settings.isEnabled, settings.cadence != .manual else { return }
+
+        automationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let delay = await self.automationDelaySeconds()
+                guard delay > 0 else { return }
+
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                _ = try? await self.runAIPM()
+            }
+        }
+    }
+
+    private func automationDelaySeconds() -> TimeInterval {
+        let settings = aiPMState.state.settings
+        let interval = cadenceSeconds(for: settings.cadence)
+        guard interval > 0 else { return 0 }
+        guard llmConfiguration.status.isAvailable else { return interval }
+        guard let lastRunAt = aiPMState.state.lastRunAt else { return 15 }
+        return max(lastRunAt.addingTimeInterval(interval).timeIntervalSinceNow, 15)
+    }
+
+    private func cadenceSeconds(for cadence: AIPMCadence) -> TimeInterval {
+        switch cadence {
+        case .manual:
+            0
+        case .hourly:
+            60 * 60
+        case .daily:
+            24 * 60 * 60
+        }
     }
 
     private func suggestBeadFields(
@@ -361,6 +443,58 @@ final class BeadsHTTPServer: ObservableObject {
             )
         } catch {
             llmConfiguration.recordProviderFailure("The provider returned a status report in an unreadable format.")
+            throw LLMProviderError.invalidResponse
+        }
+    }
+
+    private func runAIPM(request: AIPMRunRequest, store: BoardStore) async throws -> AIPMState {
+        let status = llmConfiguration.status
+        guard status.isAvailable else {
+            throw LLMProviderError.unavailable(status.message)
+        }
+
+        let settings = aiPMState.state.settings
+        guard settings.isEnabled else {
+            throw LLMProviderError.unavailable("AI PM automation is disabled.")
+        }
+
+        let configuration = llmConfiguration.configuration
+        guard let endpointURL = configuration.endpointURL else {
+            throw LLMProviderError.unavailable("The LLM endpoint URL is invalid.")
+        }
+
+        let prompt = try aiPMPrompt(request: request, settings: settings, store: store)
+        let llmResponse = try await requestLLMJSON(
+            endpointURL: endpointURL.appending(path: "chat/completions"),
+            configuration: configuration,
+            userPrompt: prompt
+        )
+
+        do {
+            let payload = try BeadsJSON.decoder.decode(LLMAIPMRunPayload.self, from: llmResponse)
+            let proposals = payload.proposals
+                .prefix(settings.maximumProposals)
+                .map { proposal in
+                    AIPMDecisionProposal(
+                        title: proposal.title,
+                        summary: proposal.summary,
+                        category: proposal.category,
+                        risk: proposal.risk,
+                        rationale: proposal.rationale,
+                        changes: proposal.changes ?? []
+                    )
+                }
+            let report = payload.report.map { report in
+                AIPMReportSnapshot(
+                    title: report.title,
+                    summary: report.summary,
+                    sections: report.sections
+                )
+            }
+            aiPMState.recordRun(summary: payload.summary, proposals: proposals, report: report)
+            return aiPMState.state
+        } catch {
+            llmConfiguration.recordProviderFailure("The provider returned an AI PM run in an unreadable format.")
             throw LLMProviderError.invalidResponse
         }
     }
@@ -634,6 +768,114 @@ final class BeadsHTTPServer: ObservableObject {
         """
     }
 
+    private func aiPMPrompt(request: AIPMRunRequest, settings: AIPMAutomationSettings, store: BoardStore) throws -> String {
+        let board = request.boardID.flatMap { boardID in
+            store.boards.first { $0.id == boardID }
+        } ?? store.selectedBoard
+        guard let board else {
+            throw LLMProviderError.unavailable("No board context is available.")
+        }
+
+        let statusByBeadID = Dictionary(
+            uniqueKeysWithValues: board.columns.flatMap { column in
+                column.beads.map { bead in (bead.id, bead.status ?? column.name) }
+            }
+        )
+        let activeBeads = board.columns
+            .flatMap(\.beads)
+            .filter { !$0.isArchived }
+        let context = activeBeads.map { bead in
+            [
+                "id=\(bead.relationshipID)",
+                "title=\(bead.title)",
+                "type=\(bead.issueType ?? bead.sourceType.displayName)",
+                "status=\(statusByBeadID[bead.id] ?? "Unknown")",
+                "priority=\(bead.priority.rawValue)",
+                "blocked=\(bead.isBlocked)",
+                "stale=\(bead.isStale)",
+                "parent=\(bead.parentBeadsID ?? "none")",
+                "children=\(bead.childBeadsIDs.joined(separator: ", "))",
+                "dependencies=\(bead.dependencyBeadsIDs.joined(separator: ", "))",
+                "summary=\(bead.summary)",
+                "notes=\(bead.notes.prefix(280))"
+            ].joined(separator: " | ")
+        }.joined(separator: "\n")
+
+        let pendingDecisions = aiPMState.state.pendingProposals
+            .prefix(12)
+            .map { proposal in
+                "\(proposal.category.rawValue) / \(proposal.risk.rawValue): \(proposal.title) - \(proposal.summary)"
+            }
+            .joined(separator: "\n")
+
+        return """
+        Act as an autonomous AI project manager for a software project. Inspect the canonical board state and decide what needs PM attention without asking the user to write prompts.
+
+        Autonomy policy:
+        - You may autonomously analyze backlog, sequencing, risk, stale work, missing work, handoff quality, and reporting.
+        - You must surface decisions as reviewable proposals.
+        - Do not silently mutate project state.
+        - When autonomy is surfaceDecisions, focus on decisions and risks with minimal proposed changes.
+        - When autonomy is autonomousProposals, include concrete draft changes that could be applied after review.
+        - Prefer a small number of high-signal proposals over a large backlog of noise.
+        - Every proposal should be specific enough for a user to accept, dismiss, or turn into child beads later.
+
+        Return JSON with exactly this shape:
+        {
+          "summary": "short PM run summary",
+          "proposals": [
+            {
+              "title": "decision or PM action",
+              "summary": "what should happen",
+              "category": "backlog|planning|risk|milestone|decision|handoff",
+              "risk": "low|medium|high",
+              "rationale": "why this matters now",
+              "changes": [
+                {
+                  "kind": "updateField|createChildBead|addDependency|setParent",
+                  "targetBeadsID": "existing bead id or null",
+                  "field": "summary|notes|labels|priority|issueType|parentBeadsID|dependencyBeadsIDs|title or null",
+                  "value": "field value, dependency id, or parent id when relevant",
+                  "title": "child title when creating a child bead",
+                  "summary": "child or replacement summary",
+                  "notes": "acceptance criteria and implementation guidance",
+                  "labels": ["label"],
+                  "priority": "low|normal|high|urgent or null",
+                  "issueType": "task|bug|feature|epic|chore|research or null",
+                  "rationale": "why this change improves execution"
+                }
+              ]
+            }
+          ],
+          "report": {
+            "title": "short operational report title",
+            "summary": "2-4 sentence status summary",
+            "sections": [
+              { "title": "Risks|Decisions|Next Actions|Blocked|Stale|Completed|Active", "items": ["terse bullet"] }
+            ]
+          }
+        }
+
+        Settings:
+        cadence=\(settings.cadence.rawValue)
+        autonomy=\(settings.autonomyLevel.rawValue)
+        reviewsBacklog=\(settings.reviewsBacklog) \(settings.reviewsBacklog ? "" : "(do not propose backlog expansion unless it blocks active work)")
+        generatesReports=\(settings.generatesReports) \(settings.generatesReports ? "" : "(return report as null)")
+        maximumProposals=\(settings.maximumProposals)
+
+        Board:
+        name=\(board.name)
+        repository=\(board.repositoryName)
+        columns=\(board.columns.map(\.name).joined(separator: ", "))
+
+        Pending decisions already surfaced:
+        \(pendingDecisions.isEmpty ? "None" : pendingDecisions)
+
+        Beads:
+        \(context.isEmpty ? "No active beads." : context)
+        """
+    }
+
     private func reviewBeads(root: Bead, board: Board, scope: BeadPlanReviewScope) -> [Bead] {
         guard scope == .subtree else { return [root] }
 
@@ -688,7 +930,7 @@ final class BeadsHTTPServer: ObservableObject {
                 "board-snapshot-replace",
                 "beads-relationship-metadata",
                 "server-side-llm-status"
-            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance", "ai-bead-field-suggestions", "ai-plan-review", "ai-status-report"] : []),
+            ] + (llmConfiguration.status.isAvailable ? ["ai-planning-assistance", "ai-bead-field-suggestions", "ai-plan-review", "ai-status-report", "ai-pm-automation"] : []),
             llmStatus: llmConfiguration.status
         )
     }
@@ -744,6 +986,27 @@ private struct LLMPlanReviewPayload: Decodable {
 }
 
 private struct LLMStatusReportPayload: Decodable {
+    var title: String
+    var summary: String
+    var sections: [BeadStatusReportSection]
+}
+
+private struct LLMAIPMRunPayload: Decodable {
+    var summary: String
+    var proposals: [LLMAIPMProposalPayload]
+    var report: LLMAIPMReportPayload?
+}
+
+private struct LLMAIPMProposalPayload: Decodable {
+    var title: String
+    var summary: String
+    var category: AIPMProposalCategory
+    var risk: AIPMProposalRisk
+    var rationale: String
+    var changes: [BeadPlanReviewChange]?
+}
+
+private struct LLMAIPMReportPayload: Decodable {
     var title: String
     var summary: String
     var sections: [BeadStatusReportSection]

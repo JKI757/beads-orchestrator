@@ -24,6 +24,7 @@ struct RootView: View {
     #if os(macOS)
     @State private var showingPairingCode = false
     @State private var showingLLMSettings = false
+    @State private var showingAIPMDashboard = false
     #endif
 
     var body: some View {
@@ -130,6 +131,10 @@ struct RootView: View {
                         showingLLMSettings = true
                     }
 
+                    Button("AI PM Dashboard") {
+                        showingAIPMDashboard = true
+                    }
+
                     Text(server.llmConfiguration.status.message)
 
                     Text(server.statusMessage)
@@ -189,6 +194,10 @@ struct RootView: View {
         }
         .sheet(isPresented: $showingLLMSettings) {
             LLMSettingsSheet(configurationStore: server.llmConfiguration)
+        }
+        .sheet(isPresented: $showingAIPMDashboard) {
+            AIPMDashboardSheet(pmState: server.aiPMState)
+                .environmentObject(server)
         }
         #endif
         #if os(macOS)
@@ -963,6 +972,231 @@ private struct LLMSettingsSheet: View {
         .frame(minHeight: 360)
         .onAppear {
             draft = configurationStore.configuration
+        }
+    }
+}
+
+private struct AIPMDashboardSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var server: BeadsHTTPServer
+    @ObservedObject var pmState: AIPMStateStore
+
+    @State private var draft = AIPMAutomationSettings()
+    @State private var isRunning = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section("Automation") {
+                    Toggle("AI PM enabled", isOn: $draft.isEnabled)
+
+                    Picker("Cadence", selection: $draft.cadence) {
+                        ForEach(AIPMCadence.allCases) { cadence in
+                            Text(cadence.displayName).tag(cadence)
+                        }
+                    }
+
+                    Picker("Autonomy", selection: $draft.autonomyLevel) {
+                        ForEach(AIPMAutonomyLevel.allCases) { autonomy in
+                            Text(autonomy.displayName).tag(autonomy)
+                        }
+                    }
+
+                    Toggle("Review backlog", isOn: $draft.reviewsBacklog)
+                    Toggle("Generate status reports", isOn: $draft.generatesReports)
+
+                    Stepper(value: $draft.maximumProposals, in: 1...20) {
+                        LabeledContent("Maximum proposals", value: "\(draft.maximumProposals)")
+                    }
+                }
+
+                Section("Status") {
+                    LabeledContent("Last run", value: lastRunText)
+                    if let summary = pmState.state.lastRunSummary, !summary.isEmpty {
+                        Text(summary)
+                            .foregroundStyle(.secondary)
+                    }
+                    LabeledContent("Pending decisions", value: "\(pmState.state.pendingProposals.count)")
+                    Text(server.llmConfiguration.status.message)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let errorMessage {
+                    Section("Run Error") {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("Pending Decisions") {
+                    if pmState.state.pendingProposals.isEmpty {
+                        Text("No pending decisions.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(pmState.state.pendingProposals) { proposal in
+                            AIPMProposalRow(proposal: proposal) { status in
+                                pmState.updateProposal(proposal.id, status: status)
+                            }
+                        }
+                    }
+                }
+
+                Section("Recent Reports") {
+                    if pmState.state.reports.isEmpty {
+                        Text("No reports generated yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(pmState.state.reports.prefix(5)) { report in
+                            AIPMReportRow(report: report)
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+
+            Divider()
+
+            HStack {
+                Button("Run Now") {
+                    Task { await runPM() }
+                }
+                .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
+
+                if isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+
+                Button("Save") {
+                    save()
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding()
+        }
+        .navigationTitle("AI PM")
+        .frame(width: 640)
+        .frame(minHeight: 620)
+        .onAppear {
+            draft = pmState.state.settings
+        }
+    }
+
+    private var lastRunText: String {
+        guard let date = pmState.state.lastRunAt else { return "Never" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func save() {
+        server.saveAIPMSettings(draft)
+        draft = pmState.state.settings
+    }
+
+    private func runPM() async {
+        save()
+        isRunning = true
+        errorMessage = nil
+        defer { isRunning = false }
+
+        do {
+            _ = try await server.runAIPM()
+            draft = pmState.state.settings
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct AIPMProposalRow: View {
+    let proposal: AIPMDecisionProposal
+    var updateStatus: (AIPMProposalStatus) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(proposal.title)
+                    .font(.headline)
+                Spacer()
+                Text(proposal.category.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(proposal.risk.rawValue.capitalized)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(riskColor)
+            }
+
+            Text(proposal.summary)
+                .foregroundStyle(.secondary)
+            Text(proposal.rationale)
+                .font(.callout)
+
+            if !proposal.changes.isEmpty {
+                Text("\(proposal.changes.count) proposed change\(proposal.changes.count == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button("Mark Accepted") {
+                    updateStatus(.accepted)
+                }
+                Button("Dismiss") {
+                    updateStatus(.dismissed)
+                }
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var riskColor: Color {
+        switch proposal.risk {
+        case .low:
+            .secondary
+        case .medium:
+            .orange
+        case .high:
+            .red
+        }
+    }
+}
+
+private struct AIPMReportRow: View {
+    let report: AIPMReportSnapshot
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(report.summary)
+                    .foregroundStyle(.secondary)
+
+                ForEach(report.sections) { section in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(section.title)
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(section.items, id: \.self) { item in
+                            Text(item)
+                                .font(.callout)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(report.title)
+                Text(report.generatedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

@@ -83,6 +83,24 @@ func (c *Client) StatusReport(ctx context.Context, request BeadStatusReportReque
 	return response, err
 }
 
+func (c *Client) AIPMState(ctx context.Context) (AIPMState, error) {
+	var state AIPMState
+	err := c.get(ctx, "ai/pm/state", true, &state)
+	return state, err
+}
+
+func (c *Client) UpdateAIPMSettings(ctx context.Context, settings AIPMAutomationSettings) (AIPMState, error) {
+	var state AIPMState
+	err := c.put(ctx, "ai/pm/settings", settings, true, &state)
+	return state, err
+}
+
+func (c *Client) RunAIPM(ctx context.Context, request AIPMRunRequest) (AIPMState, error) {
+	var state AIPMState
+	err := c.post(ctx, "ai/pm/run", request, true, &state)
+	return state, err
+}
+
 func (c *Client) ReplaceBoards(ctx context.Context, boards []Board) error {
 	body, err := json.MarshalIndent(boards, "", "  ")
 	if err != nil {
@@ -116,6 +134,23 @@ func (c *Client) post(ctx context.Context, path string, body any, requiresAuth b
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(path), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if requiresAuth {
+		c.authorize(req)
+	}
+	return c.do(req, target)
+}
+
+func (c *Client) put(ctx context.Context, path string, body any, requiresAuth bool, target any) error {
+	payload, err := json.MarshalIndent(body, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.endpoint(path), bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
