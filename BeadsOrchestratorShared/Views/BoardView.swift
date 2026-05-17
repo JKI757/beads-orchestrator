@@ -727,7 +727,8 @@ struct HierarchyView: View {
                 isCompact: isCompact,
                 mode: $mode,
                 pendingSourceID: pendingSourceID,
-                graphMessage: graphMessage
+                graphMessage: graphMessage,
+                autoArrange: autoArrangeGraph
             )
 
             if graph.nodes.isEmpty {
@@ -812,6 +813,14 @@ struct HierarchyView: View {
             graphMessage = "Removed dependency from \(target.bead.title)."
         }
     }
+
+    private func autoArrangeGraph() {
+        withAnimation(.snappy(duration: 0.28)) {
+            nodeOffsets = [:]
+            pendingSourceID = nil
+            graphMessage = "Auto-arranged \(graph.nodes.count) bead\(graph.nodes.count == 1 ? "" : "s")."
+        }
+    }
 }
 
 private struct HierarchyHeader: View {
@@ -822,6 +831,7 @@ private struct HierarchyHeader: View {
     @Binding var mode: HierarchyGraphMode
     let pendingSourceID: String?
     let graphMessage: String?
+    let autoArrange: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -858,6 +868,14 @@ private struct HierarchyHeader: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: isCompact ? .infinity : 360)
+
+                Button {
+                    autoArrange()
+                } label: {
+                    Label("Auto Arrange", systemImage: "square.grid.3x3.middle.filled")
+                }
+                .buttonStyle(.bordered)
+                .disabled(graph.nodes.isEmpty)
 
                 if let pendingSourceID {
                     Text("Source: \(pendingSourceID)")
@@ -1273,20 +1291,19 @@ private enum HierarchyGraphBuilder {
         let dependencyEdges = dependencyEdges(for: orderedBeads, visibleIDs: visibleIDs, beadsByID: beadsByID)
         let depthByID = depths(for: orderedBeads, childIDsByParent: childIDsByParent)
         let maxDepth = depthByID.values.max() ?? 0
-        let IDsByDepth = Dictionary(grouping: orderedBeads.map(\.relationshipID)) { depthByID[$0] ?? 0 }
+        let framesByID = layoutFrames(
+            for: orderedBeads,
+            depthByID: depthByID,
+            childIDsByParent: childIDsByParent,
+            dependencyEdges: dependencyEdges,
+            metrics: metrics,
+            offsets: offsets
+        )
         var nodes: [HierarchyGraphNode] = []
 
-        for depth in 0...maxDepth {
-            let IDs = IDsByDepth[depth] ?? []
-            for (row, relationshipID) in IDs.enumerated() {
-                guard let bead = beadsByID[relationshipID] else { continue }
-                let offset = offsets[relationshipID] ?? .zero
-                let frame = CGRect(
-                    x: metrics.inset + CGFloat(depth) * (metrics.nodeWidth + metrics.columnGap) + offset.width,
-                    y: metrics.inset + CGFloat(row) * (metrics.nodeHeight + metrics.rowGap) + offset.height,
-                    width: metrics.nodeWidth,
-                    height: metrics.nodeHeight
-                )
+        for bead in orderedBeads {
+            let relationshipID = bead.relationshipID
+            guard let frame = framesByID[relationshipID] else { continue }
                 nodes.append(
                     HierarchyGraphNode(
                         bead: bead,
@@ -1296,7 +1313,6 @@ private enum HierarchyGraphBuilder {
                         dependentCount: bead.dependentBeadsIDs.filter { visibleIDs.contains($0) }.count
                     )
                 )
-            }
         }
 
         let parentEdges = childIDsByParent.flatMap { parentID, childIDs in
@@ -1337,6 +1353,12 @@ private enum HierarchyGraphBuilder {
             if let parentID = bead.parentBeadsID, visibleIDs.contains(parentID) {
                 parentIDsByChild[relationshipID, default: []].append(parentID)
             }
+            for dependencyID in bead.dependencyBeadsIDs where visibleIDs.contains(dependencyID) {
+                parentIDsByChild[relationshipID, default: []].append(dependencyID)
+            }
+            for dependentID in bead.dependentBeadsIDs where visibleIDs.contains(dependentID) {
+                parentIDsByChild[dependentID, default: []].append(relationshipID)
+            }
         }
 
         for (parentID, childIDs) in childIDsByParent {
@@ -1370,6 +1392,215 @@ private enum HierarchyGraphBuilder {
         }
 
         return memo
+    }
+
+    private static func layoutFrames(
+        for beads: [Bead],
+        depthByID: [String: Int],
+        childIDsByParent: [String: [String]],
+        dependencyEdges: [HierarchyGraphEdge],
+        metrics: HierarchyGraphMetrics,
+        offsets: [String: CGSize]
+    ) -> [String: CGRect] {
+        let relationshipIDs = beads.map(\.relationshipID)
+        let visibleIDs = Set(relationshipIDs)
+        let originalIndexByID = Dictionary(uniqueKeysWithValues: beads.enumerated().map { ($0.element.relationshipID, $0.offset) })
+        let successorsByID = successorMap(
+            visibleIDs: visibleIDs,
+            childIDsByParent: childIDsByParent,
+            dependencyEdges: dependencyEdges
+        )
+        let predecessorsByID = predecessorMap(from: successorsByID)
+        let components = connectedComponents(
+            relationshipIDs: relationshipIDs,
+            successorsByID: successorsByID,
+            originalIndexByID: originalIndexByID
+        )
+        var framesByID: [String: CGRect] = [:]
+        var nextComponentY = metrics.inset
+
+        for component in components {
+            let componentSet = Set(component)
+            let roots = componentRoots(
+                in: component,
+                componentSet: componentSet,
+                predecessorsByID: predecessorsByID,
+                depthByID: depthByID,
+                originalIndexByID: originalIndexByID
+            )
+            var centerYByID: [String: CGFloat] = [:]
+            var visiting = Set<String>()
+            var nextLeafCenterY = nextComponentY + metrics.nodeHeight / 2
+
+            func assignCenterY(for relationshipID: String) -> CGFloat {
+                if let centerY = centerYByID[relationshipID] {
+                    return centerY
+                }
+
+                guard !visiting.contains(relationshipID) else {
+                    let centerY = nextLeafCenterY
+                    nextLeafCenterY += metrics.nodeHeight + metrics.rowGap
+                    return centerY
+                }
+
+                visiting.insert(relationshipID)
+                let childIDs = (successorsByID[relationshipID] ?? [])
+                    .filter { componentSet.contains($0) }
+                    .filter { (depthByID[$0] ?? 0) > (depthByID[relationshipID] ?? 0) }
+                    .sorted { lhs, rhs in
+                        let lhsDepth = depthByID[lhs] ?? 0
+                        let rhsDepth = depthByID[rhs] ?? 0
+                        if lhsDepth != rhsDepth {
+                            return lhsDepth < rhsDepth
+                        }
+                        return (originalIndexByID[lhs] ?? .max) < (originalIndexByID[rhs] ?? .max)
+                    }
+
+                let centerY: CGFloat
+                if childIDs.isEmpty {
+                    centerY = nextLeafCenterY
+                    nextLeafCenterY += metrics.nodeHeight + metrics.rowGap
+                } else {
+                    let childCenters = childIDs.map { assignCenterY(for: $0) }
+                    centerY = childCenters.reduce(0, +) / CGFloat(childCenters.count)
+                }
+
+                visiting.remove(relationshipID)
+                centerYByID[relationshipID] = centerY
+                return centerY
+            }
+
+            for rootID in roots {
+                _ = assignCenterY(for: rootID)
+            }
+            for relationshipID in component.sorted(by: { (originalIndexByID[$0] ?? .max) < (originalIndexByID[$1] ?? .max) }) {
+                _ = assignCenterY(for: relationshipID)
+            }
+
+            for relationshipID in component {
+                guard let centerY = centerYByID[relationshipID] else { continue }
+                let depth = depthByID[relationshipID] ?? 0
+                let offset = offsets[relationshipID] ?? .zero
+                framesByID[relationshipID] = CGRect(
+                    x: metrics.inset + CGFloat(depth) * (metrics.nodeWidth + metrics.columnGap) + offset.width,
+                    y: centerY - metrics.nodeHeight / 2 + offset.height,
+                    width: metrics.nodeWidth,
+                    height: metrics.nodeHeight
+                )
+            }
+
+            let componentMaxY = component
+                .compactMap { centerYByID[$0] }
+                .map { $0 + metrics.nodeHeight / 2 }
+                .max() ?? nextComponentY
+            nextComponentY = componentMaxY + metrics.rowGap * 2
+        }
+
+        return framesByID
+    }
+
+    private static func successorMap(
+        visibleIDs: Set<String>,
+        childIDsByParent: [String: [String]],
+        dependencyEdges: [HierarchyGraphEdge]
+    ) -> [String: [String]] {
+        var successorsByID: [String: [String]] = [:]
+
+        for (parentID, childIDs) in childIDsByParent where visibleIDs.contains(parentID) {
+            for childID in childIDs where visibleIDs.contains(childID) {
+                appendUnique(childID, to: &successorsByID[parentID, default: []])
+            }
+        }
+
+        for edge in dependencyEdges where visibleIDs.contains(edge.fromID) && visibleIDs.contains(edge.toID) {
+            appendUnique(edge.toID, to: &successorsByID[edge.fromID, default: []])
+        }
+
+        return successorsByID
+    }
+
+    private static func predecessorMap(from successorsByID: [String: [String]]) -> [String: [String]] {
+        var predecessorsByID: [String: [String]] = [:]
+
+        for (sourceID, targetIDs) in successorsByID {
+            for targetID in targetIDs {
+                appendUnique(sourceID, to: &predecessorsByID[targetID, default: []])
+            }
+        }
+
+        return predecessorsByID
+    }
+
+    private static func connectedComponents(
+        relationshipIDs: [String],
+        successorsByID: [String: [String]],
+        originalIndexByID: [String: Int]
+    ) -> [[String]] {
+        var neighborsByID: [String: [String]] = [:]
+        for (sourceID, targetIDs) in successorsByID {
+            for targetID in targetIDs {
+                appendUnique(targetID, to: &neighborsByID[sourceID, default: []])
+                appendUnique(sourceID, to: &neighborsByID[targetID, default: []])
+            }
+        }
+
+        var visited = Set<String>()
+        var components: [[String]] = []
+
+        for relationshipID in relationshipIDs where !visited.contains(relationshipID) {
+            var stack = [relationshipID]
+            var component: [String] = []
+            visited.insert(relationshipID)
+
+            while let currentID = stack.popLast() {
+                component.append(currentID)
+                for neighborID in neighborsByID[currentID] ?? [] where !visited.contains(neighborID) {
+                    visited.insert(neighborID)
+                    stack.append(neighborID)
+                }
+            }
+
+            components.append(component.sorted {
+                (originalIndexByID[$0] ?? .max) < (originalIndexByID[$1] ?? .max)
+            })
+        }
+
+        return components.sorted {
+            let lhsIndex = $0.compactMap { originalIndexByID[$0] }.min() ?? .max
+            let rhsIndex = $1.compactMap { originalIndexByID[$0] }.min() ?? .max
+            return lhsIndex < rhsIndex
+        }
+    }
+
+    private static func componentRoots(
+        in component: [String],
+        componentSet: Set<String>,
+        predecessorsByID: [String: [String]],
+        depthByID: [String: Int],
+        originalIndexByID: [String: Int]
+    ) -> [String] {
+        let roots = component.filter { relationshipID in
+            let predecessors = predecessorsByID[relationshipID] ?? []
+            return !predecessors.contains { componentSet.contains($0) }
+        }
+        let fallbackDepth = component.map { depthByID[$0] ?? 0 }.min() ?? 0
+        let candidates = roots.isEmpty
+            ? component.filter { (depthByID[$0] ?? 0) == fallbackDepth }
+            : roots
+
+        return candidates.sorted {
+            let lhsDepth = depthByID[$0] ?? 0
+            let rhsDepth = depthByID[$1] ?? 0
+            if lhsDepth != rhsDepth {
+                return lhsDepth < rhsDepth
+            }
+            return (originalIndexByID[$0] ?? .max) < (originalIndexByID[$1] ?? .max)
+        }
+    }
+
+    private static func appendUnique(_ value: String, to values: inout [String]) {
+        guard !values.contains(value) else { return }
+        values.append(value)
     }
 
     private static func dependencyEdges(for beads: [Bead], visibleIDs: Set<String>, beadsByID: [String: Bead]) -> [HierarchyGraphEdge] {
