@@ -77,10 +77,16 @@ struct BeadsProjectImporter {
         let issuesURL = beadsDirectoryURL.appendingPathComponent("issues.jsonl")
         if FileManager.default.fileExists(atPath: issuesURL.path(percentEncoded: false)) {
             let importedIssues = try readIssues(from: issuesURL)
+            let relationships = BeadsIssueRelationships(issues: importedIssues)
             for issue in importedIssues {
                 let columnName = columnName(for: issue.status)
                 let columnIndex = columns.firstIndex { $0.name == columnName } ?? 0
-                columns[columnIndex].beads.append(issue.makeBead())
+                columns[columnIndex].beads.append(
+                    issue.makeBead(
+                        childBeadsIDs: relationships.childIDsByParentID[issue.id ?? ""] ?? [],
+                        dependentBeadsIDs: relationships.dependentIDsByIssueID[issue.id ?? ""] ?? []
+                    )
+                )
             }
         }
 
@@ -138,6 +144,10 @@ private struct BeadsIssueRecord: Decodable {
     var status: String?
     var priority: Int?
     var issueType: String?
+    var parentID: String?
+    var dependencies: [BeadsIssueDependencyRecord]
+    var dependencyCount: Int?
+    var dependentCount: Int?
     var createdAt: Date?
     var updatedAt: Date?
     var closedAt: Date?
@@ -152,6 +162,12 @@ private struct BeadsIssueRecord: Decodable {
         case status
         case priority
         case issueType = "issue_type"
+        case parentID = "parent_id"
+        case parent
+        case parentIssueID = "parent_issue_id"
+        case dependencies
+        case dependencyCount = "dependency_count"
+        case dependentCount = "dependent_count"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case closedAt = "closed_at"
@@ -159,11 +175,32 @@ private struct BeadsIssueRecord: Decodable {
         case labels
     }
 
-    func makeBead() -> Bead {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        acceptanceCriteria = try container.decodeIfPresent(String.self, forKey: .acceptanceCriteria)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        priority = try container.decodeIfPresent(Int.self, forKey: .priority)
+        issueType = try container.decodeIfPresent(String.self, forKey: .issueType)
+        parentID = try container.decodeIfPresent(String.self, forKey: .parentID)
+            ?? container.decodeIfPresent(String.self, forKey: .parent)
+            ?? container.decodeIfPresent(String.self, forKey: .parentIssueID)
+        dependencies = try container.decodeIfPresent([BeadsIssueDependencyRecord].self, forKey: .dependencies) ?? []
+        dependencyCount = try container.decodeIfPresent(Int.self, forKey: .dependencyCount)
+        dependentCount = try container.decodeIfPresent(Int.self, forKey: .dependentCount)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        closedAt = try container.decodeIfPresent(Date.self, forKey: .closedAt)
+        closeReason = try container.decodeIfPresent(String.self, forKey: .closeReason)
+        labels = try container.decodeIfPresent([String].self, forKey: .labels)
+    }
+
+    func makeBead(childBeadsIDs: [String] = [], dependentBeadsIDs: [String] = []) -> Bead {
         let issueTitle = title?.nilIfBlank ?? id ?? "Untitled bead"
         let issueLabels = Array(Set((labels ?? []) + [issueType?.nilIfBlank].compactMap(\.self))).sorted()
         let notes = [
-            id.map { "Beads ID: \($0)" },
             acceptanceCriteria?.nilIfBlank.map { "Acceptance Criteria:\n\($0)" },
             closeReason?.nilIfBlank.map { "Close Reason: \($0)" }
         ]
@@ -171,6 +208,15 @@ private struct BeadsIssueRecord: Decodable {
             .joined(separator: "\n\n")
 
         return Bead(
+            beadsID: id,
+            issueType: issueType,
+            status: status,
+            parentBeadsID: parentID?.nilIfBlank,
+            childBeadsIDs: childBeadsIDs.sorted(),
+            dependencyBeadsIDs: dependencyBeadsIDs,
+            dependentBeadsIDs: dependentBeadsIDs.sorted(),
+            dependencyCount: dependencyCount ?? dependencyBeadsIDs.count,
+            dependentCount: dependentCount ?? dependentBeadsIDs.count,
             title: issueTitle,
             summary: description ?? "",
             sourceType: .manual,
@@ -181,6 +227,13 @@ private struct BeadsIssueRecord: Decodable {
             createdAt: createdAt ?? updatedAt ?? .now,
             updatedAt: updatedAt ?? createdAt ?? .now
         )
+    }
+
+    var dependencyBeadsIDs: [String] {
+        dependencies
+            .map(\.dependsOnID)
+            .filter { !$0.isEmpty }
+            .sorted()
     }
 
     private var beadPriority: BeadPriority {
@@ -195,6 +248,40 @@ private struct BeadsIssueRecord: Decodable {
         default:
             return .low
         }
+    }
+}
+
+private struct BeadsIssueDependencyRecord: Decodable {
+    var issueID: String
+    var dependsOnID: String
+    var type: String?
+
+    enum CodingKeys: String, CodingKey {
+        case issueID = "issue_id"
+        case dependsOnID = "depends_on_id"
+        case type
+    }
+}
+
+private struct BeadsIssueRelationships {
+    var childIDsByParentID: [String: [String]] = [:]
+    var dependentIDsByIssueID: [String: [String]] = [:]
+
+    init(issues: [BeadsIssueRecord]) {
+        for issue in issues {
+            guard let issueID = issue.id?.nilIfBlank else { continue }
+
+            if let parentID = issue.parentID?.nilIfBlank {
+                childIDsByParentID[parentID, default: []].append(issueID)
+            }
+
+            for dependencyID in issue.dependencyBeadsIDs {
+                dependentIDsByIssueID[dependencyID, default: []].append(issueID)
+            }
+        }
+
+        childIDsByParentID = childIDsByParentID.mapValues { $0.sorted() }
+        dependentIDsByIssueID = dependentIDsByIssueID.mapValues { $0.sorted() }
     }
 }
 

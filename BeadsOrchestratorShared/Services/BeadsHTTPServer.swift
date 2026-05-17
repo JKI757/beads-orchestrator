@@ -217,7 +217,8 @@ final class BeadsHTTPServer: ObservableObject {
                 "qr-pairing",
                 "bearer-auth",
                 "board-snapshot-read",
-                "board-snapshot-replace"
+                "board-snapshot-replace",
+                "beads-relationship-metadata"
             ]
         )
     }

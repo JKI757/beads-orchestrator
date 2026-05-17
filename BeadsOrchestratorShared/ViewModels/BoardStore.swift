@@ -47,9 +47,11 @@ final class BoardStore: ObservableObject {
     var selectedBead: Bead? {
         guard let selectedBeadID else { return nil }
 
-        return selectedBoard?.columns
-            .flatMap(\.beads)
-            .first { $0.id == selectedBeadID }
+        return selectedBoardBeads.first { $0.id == selectedBeadID }
+    }
+
+    var selectedBoardBeads: [Bead] {
+        selectedBoard?.columns.flatMap(\.beads) ?? []
     }
 
     var selectedColumnID: BoardColumn.ID? {
@@ -68,6 +70,32 @@ final class BoardStore: ObservableObject {
         selectedBeadID = bead.id
     }
 
+    func selectBead(beadsID: String) {
+        guard let bead = bead(beadsID: beadsID) else { return }
+        selectedBeadID = bead.id
+    }
+
+    func bead(beadsID: String) -> Bead? {
+        selectedBoardBeads.first { $0.beadsID == beadsID }
+    }
+
+    func parentBead(for bead: Bead) -> Bead? {
+        guard let parentBeadsID = bead.parentBeadsID else { return nil }
+        return self.bead(beadsID: parentBeadsID)
+    }
+
+    func childBeads(for bead: Bead) -> [Bead] {
+        beads(for: bead.childBeadsIDs)
+    }
+
+    func dependencyBeads(for bead: Bead) -> [Bead] {
+        beads(for: bead.dependencyBeadsIDs)
+    }
+
+    func dependentBeads(for bead: Bead) -> [Bead] {
+        beads(for: bead.dependentBeadsIDs)
+    }
+
     func visibleBeads(in column: BoardColumn) -> [Bead] {
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let activeBeads = column.beads.filter { !$0.isArchived }
@@ -77,6 +105,13 @@ final class BoardStore: ObservableObject {
                 || bead.title.localizedCaseInsensitiveContains(trimmedSearch)
                 || bead.summary.localizedCaseInsensitiveContains(trimmedSearch)
                 || bead.notes.localizedCaseInsensitiveContains(trimmedSearch)
+                || (bead.beadsID?.localizedCaseInsensitiveContains(trimmedSearch) ?? false)
+                || (bead.issueType?.localizedCaseInsensitiveContains(trimmedSearch) ?? false)
+                || (bead.status?.localizedCaseInsensitiveContains(trimmedSearch) ?? false)
+                || (bead.parentBeadsID?.localizedCaseInsensitiveContains(trimmedSearch) ?? false)
+                || bead.childBeadsIDs.contains { $0.localizedCaseInsensitiveContains(trimmedSearch) }
+                || bead.dependencyBeadsIDs.contains { $0.localizedCaseInsensitiveContains(trimmedSearch) }
+                || bead.dependentBeadsIDs.contains { $0.localizedCaseInsensitiveContains(trimmedSearch) }
                 || bead.labels.contains { $0.localizedCaseInsensitiveContains(trimmedSearch) }
                 || (bead.branchName?.localizedCaseInsensitiveContains(trimmedSearch) ?? false)
 
@@ -371,6 +406,16 @@ final class BoardStore: ObservableObject {
         return nil
     }
 
+    private func beads(for beadsIDs: [String]) -> [Bead] {
+        let beadsByNativeID = Dictionary(
+            selectedBoardBeads.compactMap { bead in
+                bead.beadsID.map { ($0, bead) }
+            },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+        return beadsIDs.compactMap { beadsByNativeID[$0] }
+    }
+
     private static func loadBoards(from url: URL) -> [Board]? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder.beadsDecoder.decode([Board].self, from: data)
@@ -445,7 +490,11 @@ final class BoardStore: ObservableObject {
     }
 
     private static func dedupeKey(for bead: Bead) -> String {
-        [
+        if let beadsID = bead.beadsID {
+            return "beads|\(beadsID)"
+        }
+
+        return [
             bead.sourceType.rawValue,
             bead.branchName ?? "",
             bead.issueNumber.map(String.init) ?? "",
@@ -481,6 +530,10 @@ final class BoardStore: ObservableObject {
     }
 
     private static func localDiskRefreshKey(for bead: Bead) -> String {
+        if let beadsID = bead.beadsID {
+            return "beads|\(beadsID)"
+        }
+
         if let firstLine = bead.notes
             .split(whereSeparator: \.isNewline)
             .map(String.init)
@@ -545,6 +598,15 @@ final class BoardStore: ObservableObject {
 
 struct BeadDraft {
     var title = ""
+    var beadsID: String?
+    var issueType: String?
+    var status: String?
+    var parentBeadsID: String?
+    var childBeadsIDs: [String] = []
+    var dependencyBeadsIDs: [String] = []
+    var dependentBeadsIDs: [String] = []
+    var dependencyCount = 0
+    var dependentCount = 0
     var summary = ""
     var sourceType: BeadSourceType = .manual
     var sourceURL: URL?
@@ -561,6 +623,15 @@ struct BeadDraft {
 
     init(bead: Bead) {
         title = bead.title
+        beadsID = bead.beadsID
+        issueType = bead.issueType
+        status = bead.status
+        parentBeadsID = bead.parentBeadsID
+        childBeadsIDs = bead.childBeadsIDs
+        dependencyBeadsIDs = bead.dependencyBeadsIDs
+        dependentBeadsIDs = bead.dependentBeadsIDs
+        dependencyCount = bead.dependencyCount
+        dependentCount = bead.dependentCount
         summary = bead.summary
         sourceType = bead.sourceType
         sourceURL = bead.sourceURL
@@ -577,6 +648,15 @@ struct BeadDraft {
     func makeBead(id: UUID = UUID()) -> Bead {
         Bead(
             id: id,
+            beadsID: beadsID,
+            issueType: issueType,
+            status: status,
+            parentBeadsID: parentBeadsID,
+            childBeadsIDs: childBeadsIDs,
+            dependencyBeadsIDs: dependencyBeadsIDs,
+            dependentBeadsIDs: dependentBeadsIDs,
+            dependencyCount: dependencyCount,
+            dependentCount: dependentCount,
             title: title.nilIfBlank ?? "Untitled bead",
             summary: summary,
             sourceType: sourceType,

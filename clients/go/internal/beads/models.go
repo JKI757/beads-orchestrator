@@ -28,20 +28,29 @@ type Column struct {
 }
 
 type Bead struct {
-	ID                string     `json:"id"`
-	Title             string     `json:"title"`
-	Summary           string     `json:"summary"`
-	SourceType        string     `json:"sourceType"`
-	SourceURL         *string    `json:"sourceURL,omitempty"`
-	BranchName        *string    `json:"branchName,omitempty"`
-	IssueNumber       *int       `json:"issueNumber,omitempty"`
-	PullRequestNumber *int       `json:"pullRequestNumber,omitempty"`
-	Labels            []string   `json:"labels"`
-	Priority          string     `json:"priority"`
-	IsBlocked         bool       `json:"isBlocked"`
-	IsStale           bool       `json:"isStale"`
-	Notes             string     `json:"notes"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
-	ArchivedAt        *time.Time `json:"archivedAt,omitempty"`
+	ID                 string     `json:"id"`
+	BeadsID            *string    `json:"beadsID,omitempty"`
+	IssueType          *string    `json:"issueType,omitempty"`
+	Status             *string    `json:"status,omitempty"`
+	ParentBeadsID      *string    `json:"parentBeadsID,omitempty"`
+	ChildBeadsIDs      []string   `json:"childBeadsIDs,omitempty"`
+	DependencyBeadsIDs []string   `json:"dependencyBeadsIDs,omitempty"`
+	DependentBeadsIDs  []string   `json:"dependentBeadsIDs,omitempty"`
+	DependencyCount    int        `json:"dependencyCount"`
+	DependentCount     int        `json:"dependentCount"`
+	Title              string     `json:"title"`
+	Summary            string     `json:"summary"`
+	SourceType         string     `json:"sourceType"`
+	SourceURL          *string    `json:"sourceURL,omitempty"`
+	BranchName         *string    `json:"branchName,omitempty"`
+	IssueNumber        *int       `json:"issueNumber,omitempty"`
+	PullRequestNumber  *int       `json:"pullRequestNumber,omitempty"`
+	Labels             []string   `json:"labels"`
+	Priority           string     `json:"priority"`
+	IsBlocked          bool       `json:"isBlocked"`
+	IsStale            bool       `json:"isStale"`
+	Notes              string     `json:"notes"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
+	ArchivedAt         *time.Time `json:"archivedAt,omitempty"`
 }
