@@ -198,6 +198,7 @@ struct RootView: View {
 #if os(iOS)
 private struct TabletRootView: View {
     @EnvironmentObject private var store: BoardStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingNewBoard = false
     @State private var showingImportBoard = false
     @State private var showingNewBead = false
@@ -232,6 +233,15 @@ private struct TabletRootView: View {
         }
         .sheet(isPresented: $showingConnectionSettings) {
             ConnectionSettingsSheet()
+        }
+        .task {
+            await store.pullFromRemoteServerIfPaired()
+        }
+        .onChange(of: scenePhase) {
+            guard scenePhase == .active else { return }
+            Task {
+                await store.pullFromRemoteServerIfPaired()
+            }
         }
     }
 
@@ -366,6 +376,7 @@ private struct TabletLandscapeWorkspace: View {
 
 private struct CompactRootView: View {
     @EnvironmentObject private var store: BoardStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingNewBoard = false
     @State private var showingImportBoard = false
     @State private var showingNewBead = false
@@ -416,6 +427,15 @@ private struct CompactRootView: View {
             }
             .sheet(isPresented: $showingConnectionSettings) {
                 ConnectionSettingsSheet()
+            }
+        }
+        .task {
+            await store.pullFromRemoteServerIfPaired()
+        }
+        .onChange(of: scenePhase) {
+            guard scenePhase == .active else { return }
+            Task {
+                await store.pullFromRemoteServerIfPaired()
             }
         }
     }
@@ -703,7 +723,10 @@ private struct ConnectionSettingsSheet: View {
         serverURLString = payload.serverURLString
         pairingToken = payload.pairingToken
         save()
-        Task { await store.testRemoteConnection() }
+        Task {
+            await store.testRemoteConnection()
+            await store.pullFromRemoteServerIfPaired()
+        }
     }
 }
 

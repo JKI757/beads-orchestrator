@@ -283,6 +283,11 @@ final class BoardStore: ObservableObject {
         }
     }
 
+    func pullFromRemoteServerIfPaired() async {
+        guard remoteConfiguration.isPaired else { return }
+        await pullFromRemoteServer()
+    }
+
     func pushToRemoteServer() async {
         do {
             try await remoteClient.replaceBoards(boards)
@@ -390,13 +395,32 @@ final class BoardStore: ObservableObject {
                 guard let url = configuration.serverURL else {
                     throw BeadsNetworkError.invalidServerURL
                 }
-                try await BeadsServerClient(baseURL: url, pairingToken: configuration.pairingToken)
-                    .replaceBoards(boards)
+                let client = BeadsServerClient(baseURL: url, pairingToken: configuration.pairingToken)
+                let remoteBoards = try await client.boards()
+                let mergedBoards = Self.mergingBoardsForCanonicalPush(localBoards: boards, remoteBoards: remoteBoards)
+                try await client.replaceBoards(mergedBoards)
+                replaceBoards(mergedBoards)
                 remoteStatusMessage = "Saved to Mac server"
             } catch {
                 remoteStatusMessage = "Saved locally; server update failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    private static func mergingBoardsForCanonicalPush(localBoards: [Board], remoteBoards: [Board]) -> [Board] {
+        var localBoardsByID = Dictionary(uniqueKeysWithValues: localBoards.map { ($0.id, $0) })
+
+        var mergedBoards = remoteBoards.map { remoteBoard in
+            guard let localBoard = localBoardsByID.removeValue(forKey: remoteBoard.id) else {
+                return remoteBoard
+            }
+
+            return localBoard.updatedAt >= remoteBoard.updatedAt ? localBoard : remoteBoard
+        }
+
+        let localOnlyBoards = localBoards.filter { localBoardsByID[$0.id] != nil }
+        mergedBoards.append(contentsOf: localOnlyBoards)
+        return mergedBoards
     }
 
     private static func loadRemoteConfiguration() -> BeadsRemoteConfiguration {
