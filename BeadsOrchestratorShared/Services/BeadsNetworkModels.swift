@@ -256,6 +256,17 @@ enum AIPMCadence: String, Codable, CaseIterable, Identifiable {
             "Daily"
         }
     }
+
+    var intervalSeconds: TimeInterval? {
+        switch self {
+        case .manual:
+            nil
+        case .hourly:
+            60 * 60
+        case .daily:
+            24 * 60 * 60
+        }
+    }
 }
 
 enum AIPMAutonomyLevel: String, Codable, CaseIterable, Identifiable {
@@ -280,6 +291,8 @@ struct AIPMState: Codable, Equatable {
     var settings: AIPMAutomationSettings
     var lastRunAt: Date?
     var lastRunSummary: String?
+    var lastRunError: String?
+    var nextRunAt: Date?
     var proposals: [AIPMDecisionProposal]
     var reports: [AIPMReportSnapshot]
     var updatedAt: Date
@@ -288,6 +301,8 @@ struct AIPMState: Codable, Equatable {
         settings: AIPMAutomationSettings = AIPMAutomationSettings(),
         lastRunAt: Date? = nil,
         lastRunSummary: String? = nil,
+        lastRunError: String? = nil,
+        nextRunAt: Date? = nil,
         proposals: [AIPMDecisionProposal] = [],
         reports: [AIPMReportSnapshot] = [],
         updatedAt: Date = .now
@@ -295,6 +310,8 @@ struct AIPMState: Codable, Equatable {
         self.settings = settings
         self.lastRunAt = lastRunAt
         self.lastRunSummary = lastRunSummary
+        self.lastRunError = lastRunError
+        self.nextRunAt = nextRunAt
         self.proposals = proposals
         self.reports = reports
         self.updatedAt = updatedAt
@@ -713,6 +730,7 @@ final class AIPMStateStore: ObservableObject {
     func saveSettings(_ settings: AIPMAutomationSettings) {
         var nextState = state
         nextState.settings = sanitized(settings)
+        nextState.nextRunAt = nextScheduledRunDate(for: nextState)
         nextState.updatedAt = .now
         state = nextState
         persist()
@@ -722,10 +740,30 @@ final class AIPMStateStore: ObservableObject {
         var nextState = state
         nextState.lastRunAt = .now
         nextState.lastRunSummary = summary
+        nextState.lastRunError = nil
         nextState.proposals = Array((proposals + nextState.proposals).prefix(40))
         if let report {
             nextState.reports = Array(([report] + nextState.reports).prefix(20))
         }
+        nextState.nextRunAt = nextScheduledRunDate(for: nextState)
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    func recordRunFailure(_ message: String) {
+        var nextState = state
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        nextState.lastRunError = trimmedMessage.isEmpty ? nil : trimmedMessage
+        nextState.nextRunAt = nextScheduledRunDate(for: nextState)
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    func refreshSchedule() {
+        var nextState = state
+        nextState.nextRunAt = nextScheduledRunDate(for: nextState)
         nextState.updatedAt = .now
         state = nextState
         persist()
@@ -744,6 +782,12 @@ final class AIPMStateStore: ObservableObject {
         var settings = settings
         settings.maximumProposals = min(max(settings.maximumProposals, 1), 20)
         return settings
+    }
+
+    private func nextScheduledRunDate(for state: AIPMState) -> Date? {
+        guard state.settings.isEnabled, let interval = state.settings.cadence.intervalSeconds else { return nil }
+        guard let lastRunAt = state.lastRunAt else { return Date().addingTimeInterval(15) }
+        return max(lastRunAt.addingTimeInterval(interval), Date().addingTimeInterval(15))
     }
 
     private func persist() {

@@ -1042,9 +1042,14 @@ private struct AIPMDashboardSheet: View {
 
                 Section("Status") {
                     LabeledContent("Last run", value: lastRunText)
+                    LabeledContent("Next run", value: nextRunText)
                     if let summary = pmState.state.lastRunSummary, !summary.isEmpty {
                         Text(summary)
                             .foregroundStyle(.secondary)
+                    }
+                    if let error = pmState.state.lastRunError, !error.isEmpty {
+                        Text(error)
+                            .foregroundStyle(.red)
                     }
                     LabeledContent("Pending decisions", value: "\(pmState.state.pendingProposals.count)")
                     Text(server.llmConfiguration.status.message)
@@ -1137,6 +1142,12 @@ private struct AIPMDashboardSheet: View {
 
     private var lastRunText: String {
         guard let date = pmState.state.lastRunAt else { return "Never" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var nextRunText: String {
+        guard pmState.state.settings.isEnabled, pmState.state.settings.cadence != .manual else { return "Not scheduled" }
+        guard let date = pmState.state.nextRunAt else { return "Pending" }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
@@ -1589,12 +1600,17 @@ private struct RemoteAIPMDashboardSheet: View {
 
                     if let state = store.remoteAIPMState {
                         LabeledContent("Last run", value: lastRunText(for: state))
+                        LabeledContent("Next run", value: nextRunText(for: state))
                         LabeledContent("Pending decisions", value: "\(state.pendingProposals.count)")
                         LabeledContent("Cadence", value: state.settings.cadence.displayName)
                         LabeledContent("Autonomy", value: state.settings.autonomyLevel.displayName)
                         if let summary = state.lastRunSummary, !summary.isEmpty {
                             Text(summary)
                                 .foregroundStyle(.secondary)
+                        }
+                        if let error = state.lastRunError, !error.isEmpty {
+                            Text(error)
+                                .foregroundStyle(.red)
                         }
                     }
                 }
@@ -1666,6 +1682,12 @@ private struct RemoteAIPMDashboardSheet: View {
 
     private func lastRunText(for state: AIPMState) -> String {
         guard let date = state.lastRunAt else { return "Never" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func nextRunText(for state: AIPMState) -> String {
+        guard state.settings.isEnabled, state.settings.cadence != .manual else { return "Not scheduled" }
+        guard let date = state.nextRunAt else { return "Pending" }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 }

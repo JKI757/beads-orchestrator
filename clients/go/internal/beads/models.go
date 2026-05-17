@@ -171,6 +171,8 @@ type AIPMState struct {
 	Settings       AIPMAutomationSettings `json:"settings"`
 	LastRunAt      *time.Time             `json:"lastRunAt,omitempty"`
 	LastRunSummary *string                `json:"lastRunSummary,omitempty"`
+	LastRunError   *string                `json:"lastRunError,omitempty"`
+	NextRunAt      *time.Time             `json:"nextRunAt,omitempty"`
 	Proposals      []AIPMDecisionProposal `json:"proposals"`
 	Reports        []AIPMReportSnapshot   `json:"reports"`
 	UpdatedAt      time.Time              `json:"updatedAt"`

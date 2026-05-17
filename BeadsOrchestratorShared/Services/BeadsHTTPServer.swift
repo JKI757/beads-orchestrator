@@ -24,6 +24,7 @@ final class BeadsHTTPServer: ObservableObject {
 
     func configure(store: BoardStore) {
         self.store = store
+        aiPMState.refreshSchedule()
         restartAutomationLoop()
     }
 
@@ -251,7 +252,7 @@ final class BeadsHTTPServer: ObservableObject {
                 let runRequest = request.body.isEmpty
                     ? AIPMRunRequest(boardID: nil)
                     : try BeadsJSON.decoder.decode(AIPMRunRequest.self, from: request.body)
-                let response = try await runAIPM(request: runRequest, store: store)
+                let response = try await runAIPM(request: runRequest)
                 return try jsonResponse(response)
 
             case ("PUT", "/boards"):
@@ -298,9 +299,16 @@ final class BeadsHTTPServer: ObservableObject {
 
     func runAIPM(request: AIPMRunRequest = AIPMRunRequest(boardID: nil)) async throws -> AIPMState {
         guard let store else {
-            throw LLMProviderError.unavailable("No board store is attached to the server.")
+            let error = LLMProviderError.unavailable("No board store is attached to the server.")
+            aiPMState.recordRunFailure(error.localizedDescription)
+            throw error
         }
-        return try await runAIPM(request: request, store: store)
+        do {
+            return try await runAIPM(request: request, store: store)
+        } catch {
+            aiPMState.recordRunFailure(error.localizedDescription)
+            throw error
+        }
     }
 
     private func restartAutomationLoop() {
@@ -313,7 +321,7 @@ final class BeadsHTTPServer: ObservableObject {
         automationTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                let delay = await self.automationDelaySeconds()
+                let delay = self.automationDelaySeconds()
                 guard delay > 0 else { return }
 
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -325,22 +333,14 @@ final class BeadsHTTPServer: ObservableObject {
 
     private func automationDelaySeconds() -> TimeInterval {
         let settings = aiPMState.state.settings
-        let interval = cadenceSeconds(for: settings.cadence)
+        let interval = settings.cadence.intervalSeconds ?? 0
         guard interval > 0 else { return 0 }
         guard llmConfiguration.status.isAvailable else { return interval }
+        if let nextRunAt = aiPMState.state.nextRunAt {
+            return max(nextRunAt.timeIntervalSinceNow, 15)
+        }
         guard let lastRunAt = aiPMState.state.lastRunAt else { return 15 }
         return max(lastRunAt.addingTimeInterval(interval).timeIntervalSinceNow, 15)
-    }
-
-    private func cadenceSeconds(for cadence: AIPMCadence) -> TimeInterval {
-        switch cadence {
-        case .manual:
-            0
-        case .hourly:
-            60 * 60
-        case .daily:
-            24 * 60 * 60
-        }
     }
 
     private func suggestBeadFields(
