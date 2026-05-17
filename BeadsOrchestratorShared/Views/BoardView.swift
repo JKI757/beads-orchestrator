@@ -260,6 +260,11 @@ private struct ColumnView: View {
                 .padding(.bottom, 8)
             }
             .frame(width: contentWidth)
+            #if os(iOS)
+            .refreshable {
+                await store.pullFromRemoteServer()
+            }
+            #endif
         }
         .padding(.vertical, columnPadding)
         .padding(.horizontal, contentInset)

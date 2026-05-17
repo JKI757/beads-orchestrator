@@ -223,7 +223,7 @@ final class BoardStore: ObservableObject {
             let boards = try await remoteClient.boards()
             replaceBoards(boards)
             remoteServerInfo = try? await remoteClient.health()
-            remoteStatusMessage = "Pulled \(boards.count) boards"
+            remoteStatusMessage = "Downloaded \(boards.count) boards from Mac"
         } catch {
             remoteStatusMessage = error.localizedDescription
         }
@@ -233,7 +233,7 @@ final class BoardStore: ObservableObject {
         do {
             try await remoteClient.replaceBoards(boards)
             remoteServerInfo = try? await remoteClient.health()
-            remoteStatusMessage = "Updated Mac server with \(boards.count) boards"
+            remoteStatusMessage = "Overwrote Mac with \(boards.count) local boards"
         } catch {
             remoteStatusMessage = error.localizedDescription
         }

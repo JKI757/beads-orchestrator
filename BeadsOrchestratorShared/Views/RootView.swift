@@ -482,6 +482,9 @@ private struct CompactBoardView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .refreshable {
+                await store.pullFromRemoteServer()
+            }
         }
         .onAppear {
             selectedColumnID = selectedColumnID ?? board.columns.first?.id
@@ -646,14 +649,14 @@ private struct ConnectionSettingsSheet: View {
                         save()
                         Task { await store.pullFromRemoteServer() }
                     } label: {
-                        Label("Refresh From Mac", systemImage: "arrow.clockwise")
+                        Label("Download Latest from Mac", systemImage: "arrow.down.circle")
                     }
 
                     Button {
                         save()
                         Task { await store.pushToRemoteServer() }
                     } label: {
-                        Label("Replace Mac Snapshot", systemImage: "square.and.arrow.up")
+                        Label("Overwrite Mac with This Device", systemImage: "square.and.arrow.up")
                     }
                 }
             }
