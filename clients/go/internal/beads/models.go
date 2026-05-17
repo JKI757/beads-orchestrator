@@ -13,11 +13,13 @@ type ServerInfo struct {
 }
 
 type LLMStatus struct {
-	IsAvailable bool      `json:"isAvailable"`
-	Provider    string    `json:"provider"`
-	Model       *string   `json:"model,omitempty"`
-	Message     string    `json:"message"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	IsAvailable             bool      `json:"isAvailable"`
+	Provider                string    `json:"provider"`
+	Model                   *string   `json:"model,omitempty"`
+	Message                 string    `json:"message"`
+	LastLatencyMilliseconds *int      `json:"lastLatencyMilliseconds,omitempty"`
+	LastFailureMessage      *string   `json:"lastFailureMessage,omitempty"`
+	UpdatedAt               time.Time `json:"updatedAt"`
 }
 
 type Board struct {

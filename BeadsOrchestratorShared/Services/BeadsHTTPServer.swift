@@ -519,48 +519,98 @@ final class BeadsHTTPServer: ObservableObject {
         configuration: LLMServerConfiguration,
         userPrompt: String
     ) async throws -> Data {
-        var request = URLRequest(url: endpointURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if configuration.provider.requiresAPIKey {
-            request.setValue("Bearer \(configuration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
+        let attemptCount = configuration.sanitizedRetryLimit + 1
+        var lastError: Error?
+
+        for attempt in 1...attemptCount {
+            let startedAt = Date()
+            do {
+                var request = URLRequest(url: endpointURL)
+                request.httpMethod = "POST"
+                request.timeoutInterval = configuration.sanitizedTimeoutSeconds
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                if !configuration.trimmedAPIKey.isEmpty {
+                    request.setValue("Bearer \(configuration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
+                }
+
+                let chatRequest = OpenAIChatRequest(
+                    model: configuration.trimmedModelName,
+                    messages: [
+                        OpenAIChatMessage(
+                            role: "system",
+                            content: "You are an AI project manager for a software issue tracker. Return strict JSON only. Do not include markdown."
+                        ),
+                        OpenAIChatMessage(role: "user", content: userPrompt)
+                    ],
+                    temperature: 0.2,
+                    responseFormat: OpenAIResponseFormat(type: "json_object")
+                )
+                request.httpBody = try BeadsJSON.encoder.encode(chatRequest)
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let latency = Date().timeIntervalSince(startedAt)
+                guard data.count <= configuration.sanitizedMaximumResponseBytes else {
+                    throw LLMProviderError.responseTooLarge(data.count, configuration.sanitizedMaximumResponseBytes)
+                }
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw LLMProviderError.invalidResponse
+                }
+                guard 200..<300 ~= httpResponse.statusCode else {
+                    throw LLMProviderError.providerStatus(httpResponse.statusCode)
+                }
+
+                let chatResponse = try BeadsJSON.decoder.decode(OpenAIChatResponse.self, from: data)
+                guard let content = chatResponse.choices.first?.message.content else {
+                    throw LLMProviderError.invalidResponse
+                }
+                llmConfiguration.recordProviderSuccess(latency: latency)
+                return Data(stripJSONCodeFence(from: content).utf8)
+            } catch {
+                lastError = error
+                guard attempt < attemptCount, isRetryableLLMError(error) else {
+                    let providerError = normalizedLLMError(error)
+                    llmConfiguration.recordProviderFailure(providerError.localizedDescription)
+                    throw providerError
+                }
+
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * 250_000_000)
+            }
         }
 
-        let chatRequest = OpenAIChatRequest(
-            model: configuration.trimmedModelName,
-            messages: [
-                OpenAIChatMessage(
-                    role: "system",
-                    content: "You are an AI project manager for a software issue tracker. Return strict JSON only. Do not include markdown."
-                ),
-                OpenAIChatMessage(role: "user", content: userPrompt)
-            ],
-            temperature: 0.2,
-            responseFormat: OpenAIResponseFormat(type: "json_object")
-        )
-        request.httpBody = try BeadsJSON.encoder.encode(chatRequest)
+        let providerError = normalizedLLMError(lastError ?? LLMProviderError.invalidResponse)
+        llmConfiguration.recordProviderFailure(providerError.localizedDescription)
+        throw providerError
+    }
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw LLMProviderError.invalidResponse
+    private func isRetryableLLMError(_ error: Error) -> Bool {
+        if let providerError = error as? LLMProviderError {
+            switch providerError {
+            case let .providerStatus(status):
+                return status == 408 || status == 409 || status == 425 || status == 429 || (500...599).contains(status)
+            case .unavailable:
+                return true
+            case .invalidResponse, .responseTooLarge:
+                return false
             }
-            guard 200..<300 ~= httpResponse.statusCode else {
-                throw LLMProviderError.providerStatus(httpResponse.statusCode)
-            }
-
-            let chatResponse = try BeadsJSON.decoder.decode(OpenAIChatResponse.self, from: data)
-            guard let content = chatResponse.choices.first?.message.content else {
-                throw LLMProviderError.invalidResponse
-            }
-            return Data(stripJSONCodeFence(from: content).utf8)
-        } catch let error as LLMProviderError {
-            llmConfiguration.recordProviderFailure(error.localizedDescription)
-            throw error
-        } catch {
-            llmConfiguration.recordProviderFailure(error.localizedDescription)
-            throw LLMProviderError.unavailable(error.localizedDescription)
         }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed:
+                return true
+            default:
+                return false
+            }
+        }
+
+        return false
+    }
+
+    private func normalizedLLMError(_ error: Error) -> LLMProviderError {
+        if let providerError = error as? LLMProviderError {
+            return providerError
+        }
+        return LLMProviderError.unavailable(error.localizedDescription)
     }
 
     private func beadSuggestionPrompt(request: BeadFieldSuggestionRequest, store: BoardStore) -> String {
@@ -1200,6 +1250,7 @@ private enum LLMProviderError: LocalizedError {
     case unavailable(String)
     case invalidResponse
     case providerStatus(Int)
+    case responseTooLarge(Int, Int)
 
     var errorDescription: String? {
         switch self {
@@ -1209,6 +1260,8 @@ private enum LLMProviderError: LocalizedError {
             "The LLM provider returned an invalid response."
         case .providerStatus(let status):
             "The LLM provider returned HTTP \(status)."
+        case let .responseTooLarge(actual, limit):
+            "The LLM provider returned \(actual) bytes, above the configured \(limit) byte limit."
         }
     }
 }

@@ -16,6 +16,8 @@ struct BeadsLLMStatus: Codable, Equatable {
     var provider: String
     var model: String?
     var message: String
+    var lastLatencyMilliseconds: Int?
+    var lastFailureMessage: String?
     var updatedAt: Date
 }
 
@@ -743,17 +745,47 @@ struct LLMServerConfiguration: Codable, Equatable {
     var endpointURLString: String
     var modelName: String
     var apiKey: String
+    var timeoutSeconds: Double
+    var maximumResponseBytes: Int
+    var retryLimit: Int
 
     init(
         provider: LLMProviderKind = .disabled,
         endpointURLString: String = "http://127.0.0.1:11434/v1",
         modelName: String = "",
-        apiKey: String = ""
+        apiKey: String = "",
+        timeoutSeconds: Double = 60,
+        maximumResponseBytes: Int = 1_000_000,
+        retryLimit: Int = 1
     ) {
         self.provider = provider
         self.endpointURLString = endpointURLString
         self.modelName = modelName
         self.apiKey = apiKey
+        self.timeoutSeconds = timeoutSeconds
+        self.maximumResponseBytes = maximumResponseBytes
+        self.retryLimit = retryLimit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider
+        case endpointURLString
+        case modelName
+        case apiKey
+        case timeoutSeconds
+        case maximumResponseBytes
+        case retryLimit
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decodeIfPresent(LLMProviderKind.self, forKey: .provider) ?? .disabled
+        endpointURLString = try container.decodeIfPresent(String.self, forKey: .endpointURLString) ?? "http://127.0.0.1:11434/v1"
+        modelName = try container.decodeIfPresent(String.self, forKey: .modelName) ?? ""
+        apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        timeoutSeconds = try container.decodeIfPresent(Double.self, forKey: .timeoutSeconds) ?? 60
+        maximumResponseBytes = try container.decodeIfPresent(Int.self, forKey: .maximumResponseBytes) ?? 1_000_000
+        retryLimit = try container.decodeIfPresent(Int.self, forKey: .retryLimit) ?? 1
     }
 
     var trimmedEndpointURLString: String {
@@ -771,6 +803,18 @@ struct LLMServerConfiguration: Codable, Equatable {
     var endpointURL: URL? {
         URL(string: trimmedEndpointURLString)
     }
+
+    var sanitizedTimeoutSeconds: Double {
+        min(max(timeoutSeconds, 5), 300)
+    }
+
+    var sanitizedMaximumResponseBytes: Int {
+        min(max(maximumResponseBytes, 65_536), 10_000_000)
+    }
+
+    var sanitizedRetryLimit: Int {
+        min(max(retryLimit, 0), 5)
+    }
 }
 
 #if os(macOS)
@@ -778,6 +822,7 @@ struct LLMServerConfiguration: Codable, Equatable {
 final class LLMServerConfigurationStore: ObservableObject {
     @Published private(set) var configuration: LLMServerConfiguration
     @Published private var lastFailureMessage: String?
+    @Published private var lastLatencyMilliseconds: Int?
 
     private let persistenceURL: URL
 
@@ -792,17 +837,18 @@ final class LLMServerConfigurationStore: ObservableObject {
     }
 
     func save(_ configuration: LLMServerConfiguration) {
-        var sanitizedConfiguration = configuration
-        sanitizedConfiguration.endpointURLString = configuration.trimmedEndpointURLString
-        sanitizedConfiguration.modelName = configuration.trimmedModelName
-        sanitizedConfiguration.apiKey = configuration.trimmedAPIKey
-        self.configuration = sanitizedConfiguration
+        self.configuration = sanitized(configuration)
         lastFailureMessage = nil
         persist()
     }
 
     func recordProviderFailure(_ message: String) {
         lastFailureMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func recordProviderSuccess(latency: TimeInterval) {
+        lastLatencyMilliseconds = max(0, Int((latency * 1000).rounded()))
+        lastFailureMessage = nil
     }
 
     func discoverModels(for configuration: LLMServerConfiguration) async throws -> [String] {
@@ -866,6 +912,8 @@ final class LLMServerConfigurationStore: ObservableObject {
                 provider: providerName,
                 model: nil,
                 message: "Planning assistance is disabled on this Mac.",
+                lastLatencyMilliseconds: lastLatencyMilliseconds,
+                lastFailureMessage: lastFailureMessage,
                 updatedAt: Date()
             )
         }
@@ -876,6 +924,8 @@ final class LLMServerConfigurationStore: ObservableObject {
                 provider: providerName,
                 model: modelName.isEmpty ? nil : modelName,
                 message: "Enter a valid HTTP endpoint for the LLM provider.",
+                lastLatencyMilliseconds: lastLatencyMilliseconds,
+                lastFailureMessage: lastFailureMessage,
                 updatedAt: Date()
             )
         }
@@ -886,6 +936,8 @@ final class LLMServerConfigurationStore: ObservableObject {
                 provider: providerName,
                 model: nil,
                 message: "Discover and choose a model before enabling planning assistance.",
+                lastLatencyMilliseconds: lastLatencyMilliseconds,
+                lastFailureMessage: lastFailureMessage,
                 updatedAt: Date()
             )
         }
@@ -896,6 +948,8 @@ final class LLMServerConfigurationStore: ObservableObject {
                 provider: providerName,
                 model: modelName,
                 message: "LLM provider failed safely: \(lastFailureMessage)",
+                lastLatencyMilliseconds: lastLatencyMilliseconds,
+                lastFailureMessage: lastFailureMessage,
                 updatedAt: Date()
             )
         }
@@ -905,6 +959,8 @@ final class LLMServerConfigurationStore: ObservableObject {
             provider: providerName,
             model: modelName,
             message: "Planning assistance is configured on the Mac server.",
+            lastLatencyMilliseconds: lastLatencyMilliseconds,
+            lastFailureMessage: lastFailureMessage,
             updatedAt: Date()
         )
     }
@@ -919,6 +975,9 @@ final class LLMServerConfigurationStore: ObservableObject {
         sanitizedConfiguration.endpointURLString = configuration.trimmedEndpointURLString
         sanitizedConfiguration.modelName = configuration.trimmedModelName
         sanitizedConfiguration.apiKey = configuration.trimmedAPIKey
+        sanitizedConfiguration.timeoutSeconds = configuration.sanitizedTimeoutSeconds
+        sanitizedConfiguration.maximumResponseBytes = configuration.sanitizedMaximumResponseBytes
+        sanitizedConfiguration.retryLimit = configuration.sanitizedRetryLimit
         return sanitizedConfiguration
     }
 

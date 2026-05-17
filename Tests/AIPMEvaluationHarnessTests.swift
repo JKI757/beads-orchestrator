@@ -220,7 +220,10 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
             provider: .remoteOpenAICompatible,
             endpointURLString: " http://127.0.0.1:11434/v1 ",
             modelName: " llama3.2:latest ",
-            apiKey: " "
+            apiKey: " ",
+            timeoutSeconds: 1,
+            maximumResponseBytes: 10,
+            retryLimit: 99
         )
         let store = LLMServerConfigurationStore(persistenceURL: temporaryFile("llm.json"))
 
@@ -230,6 +233,26 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertTrue(store.status.isAvailable)
         XCTAssertEqual(store.status.model, "llama3.2:latest")
         XCTAssertEqual(store.configuration.trimmedAPIKey, "")
+        XCTAssertEqual(store.configuration.timeoutSeconds, 5)
+        XCTAssertEqual(store.configuration.maximumResponseBytes, 65_536)
+        XCTAssertEqual(store.configuration.retryLimit, 5)
+    }
+
+    func testLLMConfigurationDecodesLegacySettingsWithSafeguardDefaults() throws {
+        let json = """
+        {
+          "provider": "localOpenAICompatible",
+          "endpointURLString": "http://127.0.0.1:11434/v1",
+          "modelName": "qwen2.5-coder:7b",
+          "apiKey": ""
+        }
+        """
+
+        let configuration = try BeadsJSON.decoder.decode(LLMServerConfiguration.self, from: Data(json.utf8))
+
+        XCTAssertEqual(configuration.timeoutSeconds, 60)
+        XCTAssertEqual(configuration.maximumResponseBytes, 1_000_000)
+        XCTAssertEqual(configuration.retryLimit, 1)
     }
 
     func testAIPMStatePersistenceRecordsRunsFailuresAndAuditEvents() {

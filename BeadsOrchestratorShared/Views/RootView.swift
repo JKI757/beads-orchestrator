@@ -999,12 +999,34 @@ private struct LLMSettingsSheet: View {
                     }
                 }
 
+                if draft.provider.requiresEndpoint {
+                    Section("Provider Safeguards") {
+                        Stepper(value: $draft.timeoutSeconds, in: 5...300, step: 5) {
+                            LabeledContent("Timeout", value: "\(Int(draft.timeoutSeconds)) sec")
+                        }
+
+                        Stepper(value: $draft.maximumResponseBytes, in: 65_536...10_000_000, step: 262_144) {
+                            LabeledContent("Response limit", value: responseLimitText)
+                        }
+
+                        Stepper(value: $draft.retryLimit, in: 0...5) {
+                            LabeledContent("Retries", value: "\(draft.retryLimit)")
+                        }
+                    }
+                }
+
                 Section("Status") {
                     let status = configurationStore.status
                     LabeledContent("Availability", value: status.isAvailable ? "Available" : "Unavailable")
                     LabeledContent("Provider", value: status.provider)
                     if let model = status.model {
                         LabeledContent("Model", value: model)
+                    }
+                    if let latency = status.lastLatencyMilliseconds {
+                        LabeledContent("Last latency", value: "\(latency) ms")
+                    }
+                    if let failure = status.lastFailureMessage, !failure.isEmpty {
+                        LabeledContent("Last failure", value: failure)
                     }
                     Text(status.message)
                         .foregroundStyle(.secondary)
@@ -1095,6 +1117,13 @@ private struct LLMSettingsSheet: View {
             return .green
         }
         return .secondary
+    }
+
+    private var responseLimitText: String {
+        let megabytes = Double(draft.maximumResponseBytes) / 1_000_000
+        return megabytes >= 1
+            ? String(format: "%.1f MB", megabytes)
+            : "\(draft.maximumResponseBytes / 1024) KB"
     }
 }
 
