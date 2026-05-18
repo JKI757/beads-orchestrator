@@ -36,6 +36,7 @@ The macOS app is the canonical source of truth. iPhone and iPad clients are view
 - QR pairing from the Mac app to iPhone/iPad clients.
 - Bearer-token authorization for board reads and writes.
 - Manual mobile connection setup for local-network and Tailscale use.
+- macOS AI PM workspace for autonomous project review, proposal triage, reports, safety controls, and provider health.
 
 ## Architecture
 
@@ -83,6 +84,41 @@ Security notes:
 - The current server is HTTP-only and intended for local/Tailscale networks.
 - The pairing token can be regenerated from the Mac app.
 - Future hardening should include per-device tokens, Keychain-backed credential storage, conflict-aware sync, and optional TLS for non-Tailscale deployments.
+
+## macOS AI PM
+
+The macOS app includes an AI PM workspace for project-management automation over the canonical server state. It is designed to surface decisions and proposed changes while keeping user review explicit before mutations hit the board.
+
+Workflow:
+
+1. Configure an OpenAI-compatible provider from the LLM settings sheet.
+2. Select a board, then open the `AI PM` workspace from the view picker.
+3. Review provider health, run status, schedule, safety limits, and workspace metrics.
+4. Run AI PM manually or enable a scheduled cadence.
+5. Review pending decisions. Proposals can be accepted, deferred, dismissed, or reviewed for selected change application.
+6. Apply only the selected proposal actions. High-risk and broad changes require explicit approval.
+7. Use audit history to inspect applied actions and roll back supported changes.
+8. Copy generated reports as Markdown for handoff or status updates.
+
+Safety and autonomy:
+
+- `Surface Decisions` mode records reviewable decisions without generated mutations.
+- `Autonomous Proposals` mode allows the AI PM to draft concrete board changes, but application still requires review.
+- Maximum proposal count, maximum actions per proposal, maximum consecutive run failures, high-risk approval, and notification settings are configurable from the workspace.
+- Scheduled runs pause after the configured consecutive failure limit.
+- The macOS server enforces safety policy independently of the UI.
+- Supported rollbacks restore prior field/status/relationship values from audit metadata. Newly created beads are not automatically deleted by rollback.
+
+Provider observability:
+
+- The workspace shows provider status, model, endpoint, latency, last failure, timeout, response cap, and retry limit.
+- API keys and secrets are never displayed in the workspace.
+- Failures are persisted in AI PM state and shown in status/audit surfaces.
+
+Notification routing:
+
+- High-risk decisions and run failures can trigger macOS notifications.
+- AI PM notifications carry an internal route back to the AI PM workspace when opened.
 
 ## Requirements
 
