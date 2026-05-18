@@ -236,6 +236,8 @@ struct AIPMAutomationSettings: Codable, Equatable {
     var reviewsBacklog: Bool
     var generatesReports: Bool
     var maximumProposals: Int
+    var maximumActionsPerProposal: Int
+    var requiresHighRiskApproval: Bool
     var sendsNotifications: Bool
     var notifiesHighRiskProposals: Bool
     var notifiesRunFailures: Bool
@@ -247,6 +249,8 @@ struct AIPMAutomationSettings: Codable, Equatable {
         reviewsBacklog: Bool = true,
         generatesReports: Bool = true,
         maximumProposals: Int = 8,
+        maximumActionsPerProposal: Int = 5,
+        requiresHighRiskApproval: Bool = true,
         sendsNotifications: Bool = false,
         notifiesHighRiskProposals: Bool = true,
         notifiesRunFailures: Bool = true
@@ -257,6 +261,8 @@ struct AIPMAutomationSettings: Codable, Equatable {
         self.reviewsBacklog = reviewsBacklog
         self.generatesReports = generatesReports
         self.maximumProposals = maximumProposals
+        self.maximumActionsPerProposal = maximumActionsPerProposal
+        self.requiresHighRiskApproval = requiresHighRiskApproval
         self.sendsNotifications = sendsNotifications
         self.notifiesHighRiskProposals = notifiesHighRiskProposals
         self.notifiesRunFailures = notifiesRunFailures
@@ -269,6 +275,8 @@ struct AIPMAutomationSettings: Codable, Equatable {
         case reviewsBacklog
         case generatesReports
         case maximumProposals
+        case maximumActionsPerProposal
+        case requiresHighRiskApproval
         case sendsNotifications
         case notifiesHighRiskProposals
         case notifiesRunFailures
@@ -282,6 +290,8 @@ struct AIPMAutomationSettings: Codable, Equatable {
         reviewsBacklog = try container.decodeIfPresent(Bool.self, forKey: .reviewsBacklog) ?? true
         generatesReports = try container.decodeIfPresent(Bool.self, forKey: .generatesReports) ?? true
         maximumProposals = try container.decodeIfPresent(Int.self, forKey: .maximumProposals) ?? 8
+        maximumActionsPerProposal = try container.decodeIfPresent(Int.self, forKey: .maximumActionsPerProposal) ?? 5
+        requiresHighRiskApproval = try container.decodeIfPresent(Bool.self, forKey: .requiresHighRiskApproval) ?? true
         sendsNotifications = try container.decodeIfPresent(Bool.self, forKey: .sendsNotifications) ?? false
         notifiesHighRiskProposals = try container.decodeIfPresent(Bool.self, forKey: .notifiesHighRiskProposals) ?? true
         notifiesRunFailures = try container.decodeIfPresent(Bool.self, forKey: .notifiesRunFailures) ?? true
@@ -335,6 +345,10 @@ enum AIPMAutonomyLevel: String, Codable, CaseIterable, Identifiable {
         case .autonomousProposals:
             "Autonomous Proposals"
         }
+    }
+
+    var permitsDraftChanges: Bool {
+        self == .autonomousProposals
     }
 }
 
@@ -1396,6 +1410,7 @@ final class AIPMStateStore: ObservableObject {
     private func sanitized(_ settings: AIPMAutomationSettings) -> AIPMAutomationSettings {
         var settings = settings
         settings.maximumProposals = min(max(settings.maximumProposals, 1), 20)
+        settings.maximumActionsPerProposal = min(max(settings.maximumActionsPerProposal, 1), 12)
         if !settings.sendsNotifications {
             settings.notifiesHighRiskProposals = false
             settings.notifiesRunFailures = false

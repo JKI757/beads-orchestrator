@@ -315,6 +315,8 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertFalse(settings.sendsNotifications)
         XCTAssertTrue(settings.notifiesHighRiskProposals)
         XCTAssertTrue(settings.notifiesRunFailures)
+        XCTAssertEqual(settings.maximumActionsPerProposal, 5)
+        XCTAssertTrue(settings.requiresHighRiskApproval)
 
         let state = AIPMState(proposals: [
             AIPMDecisionProposal(
@@ -328,6 +330,56 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertEqual(state.unreadDecisionCount, 1)
         XCTAssertEqual(state.highRiskPendingProposals.count, 1)
         XCTAssertTrue(state.needsAttention)
+    }
+
+    func testAIPMSafetyPolicyRejectsUnsafeAutonomousApplication() {
+        let server = BeadsHTTPServer(
+            llmConfiguration: LLMServerConfigurationStore(persistenceURL: temporaryFile("llm.json")),
+            aiPMState: AIPMStateStore(persistenceURL: temporaryFile("pm-state.json"))
+        )
+        let proposal = AIPMDecisionProposal(
+            title: "Resolve launch risk",
+            summary: "Move risky work forward.",
+            category: .risk,
+            risk: .high,
+            rationale: "Launch scope is blocked.",
+            changes: [
+                BeadPlanReviewChange(kind: .setBlocked, targetBeadsID: "task-1", field: nil, value: "true", title: nil, summary: nil, notes: nil, labels: nil, priority: nil, issueType: nil, rationale: "Mark blocked."),
+                BeadPlanReviewChange(kind: .setStatus, targetBeadsID: "task-1", field: nil, value: "Blocked", title: nil, summary: nil, notes: nil, labels: nil, priority: nil, issueType: nil, rationale: "Move to blocked.")
+            ]
+        )
+
+        server.saveAIPMSettings(AIPMAutomationSettings(
+            autonomyLevel: .surfaceDecisions,
+            maximumActionsPerProposal: 1,
+            requiresHighRiskApproval: true
+        ))
+        XCTAssertNotNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 1,
+            hasExplicitApproval: true
+        ))
+
+        server.saveAIPMSettings(AIPMAutomationSettings(
+            autonomyLevel: .autonomousProposals,
+            maximumActionsPerProposal: 1,
+            requiresHighRiskApproval: true
+        ))
+        XCTAssertNotNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 2,
+            hasExplicitApproval: true
+        ))
+        XCTAssertNotNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 1,
+            hasExplicitApproval: false
+        ))
+        XCTAssertNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 1,
+            hasExplicitApproval: true
+        ))
     }
 
     func testAIPMReportSnapshotDecodesLegacyReportAndPersistsDeltas() throws {

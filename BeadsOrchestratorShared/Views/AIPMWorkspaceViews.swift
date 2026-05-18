@@ -77,6 +77,10 @@ struct AIPMWorkspaceView: View {
                         Stepper(value: $draft.maximumProposals, in: 1...20) {
                             Text("Max proposals: \(draft.maximumProposals)")
                         }
+                        Stepper(value: $draft.maximumActionsPerProposal, in: 1...12) {
+                            Text("Max actions per proposal: \(draft.maximumActionsPerProposal)")
+                        }
+                        Toggle("Require high-risk approval", isOn: $draft.requiresHighRiskApproval)
                     }
                 } label: {
                     Label("Automation", systemImage: "slider.horizontal.3")
@@ -429,6 +433,12 @@ private struct AIPMDashboardContent: View {
                     Stepper(value: $draft.maximumProposals, in: 1...20) {
                         LabeledContent("Maximum proposals", value: "\(draft.maximumProposals)")
                     }
+
+                    Stepper(value: $draft.maximumActionsPerProposal, in: 1...12) {
+                        LabeledContent("Maximum actions per proposal", value: "\(draft.maximumActionsPerProposal)")
+                    }
+
+                    Toggle("Require high-risk approval", isOn: $draft.requiresHighRiskApproval)
                 }
 
                 Section("Notifications") {
@@ -681,6 +691,8 @@ private struct AIPMProposalApplySheet: View {
 
     @State private var selectedChangeIndexes: Set<Int> = []
     @State private var results: [BeadChangeApplicationResult] = []
+    @State private var hasExplicitApproval = false
+    @State private var safetyMessage: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -710,6 +722,22 @@ private struct AIPMProposalApplySheet: View {
                     }
                 }
 
+                if requiresExplicitApproval {
+                    Section("Safety") {
+                        Toggle("Approve this mutation", isOn: $hasExplicitApproval)
+                        Text(safetySummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let safetyMessage {
+                    Section("Policy") {
+                        Label(safetyMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 if !results.isEmpty {
                     Section("Results") {
                         ForEach(results) { result in
@@ -733,7 +761,7 @@ private struct AIPMProposalApplySheet: View {
                 Button("Apply Selected") {
                     applySelectedChanges()
                 }
-                .disabled(selectedChangeIndexes.isEmpty)
+                .disabled(selectedChangeIndexes.isEmpty || (requiresExplicitApproval && !hasExplicitApproval))
                 .keyboardShortcut(.defaultAction)
             }
             .padding()
@@ -746,7 +774,25 @@ private struct AIPMProposalApplySheet: View {
         }
     }
 
+    private var requiresExplicitApproval: Bool {
+        (server.aiPMState.state.settings.requiresHighRiskApproval && proposal.risk == .high) || selectedChangeIndexes.count > 1
+    }
+
+    private var safetySummary: String {
+        if proposal.risk == .high {
+            return "High-risk proposals can change project direction or unblock risky work."
+        }
+        return "This proposal applies multiple changes to canonical board state."
+    }
+
     private func applySelectedChanges() {
+        safetyMessage = server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: selectedChangeIndexes.count,
+            hasExplicitApproval: hasExplicitApproval
+        )
+        guard safetyMessage == nil else { return }
+
         results = selectedChangeIndexes
             .sorted()
             .map { store.apply(proposal.changes[$0]) }
