@@ -80,6 +80,9 @@ struct AIPMWorkspaceView: View {
                         Stepper(value: $draft.maximumActionsPerProposal, in: 1...12) {
                             Text("Max actions per proposal: \(draft.maximumActionsPerProposal)")
                         }
+                        Stepper(value: $draft.maximumConsecutiveFailures, in: 1...10) {
+                            Text("Max run failures: \(draft.maximumConsecutiveFailures)")
+                        }
                         Toggle("Require high-risk approval", isOn: $draft.requiresHighRiskApproval)
                     }
                 } label: {
@@ -190,6 +193,7 @@ struct AIPMWorkspaceView: View {
 
     private var nextRunText: String {
         guard pmState.state.settings.isEnabled, pmState.state.settings.cadence != .manual else { return "Not scheduled" }
+        guard pmState.state.consecutiveRunFailures < pmState.state.settings.maximumConsecutiveFailures else { return "Paused after failures" }
         guard let date = pmState.state.nextRunAt else { return "Pending" }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
@@ -334,6 +338,7 @@ private struct AIPMStatusPanel: View {
                 HStack(alignment: .firstTextBaseline) {
                     LabeledContent("Last run", value: lastRunText)
                     LabeledContent("Next run", value: nextRunText)
+                    LabeledContent("Failures", value: "\(state.consecutiveRunFailures)/\(state.settings.maximumConsecutiveFailures)")
                 }
                 .font(.callout)
 
@@ -438,6 +443,10 @@ private struct AIPMDashboardContent: View {
                         LabeledContent("Maximum actions per proposal", value: "\(draft.maximumActionsPerProposal)")
                     }
 
+                    Stepper(value: $draft.maximumConsecutiveFailures, in: 1...10) {
+                        LabeledContent("Maximum run failures", value: "\(draft.maximumConsecutiveFailures)")
+                    }
+
                     Toggle("Require high-risk approval", isOn: $draft.requiresHighRiskApproval)
                 }
 
@@ -463,6 +472,7 @@ private struct AIPMDashboardContent: View {
                         Text(error)
                             .foregroundStyle(.red)
                     }
+                    LabeledContent("Consecutive failures", value: "\(pmState.state.consecutiveRunFailures)/\(pmState.state.settings.maximumConsecutiveFailures)")
                     LabeledContent("Pending decisions", value: "\(pmState.state.pendingProposals.count)")
                     Text(server.llmConfiguration.status.message)
                         .foregroundStyle(.secondary)
@@ -602,6 +612,7 @@ private struct AIPMDashboardContent: View {
 
     private var nextRunText: String {
         guard pmState.state.settings.isEnabled, pmState.state.settings.cadence != .manual else { return "Not scheduled" }
+        guard pmState.state.consecutiveRunFailures < pmState.state.settings.maximumConsecutiveFailures else { return "Paused after failures" }
         guard let date = pmState.state.nextRunAt else { return "Pending" }
         return date.formatted(date: .abbreviated, time: .shortened)
     }

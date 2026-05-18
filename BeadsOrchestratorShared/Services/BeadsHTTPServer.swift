@@ -365,14 +365,16 @@ final class BeadsHTTPServer: ObservableObject {
     }
 
     private func automationDelaySeconds() -> TimeInterval {
-        let settings = aiPMState.state.settings
+        let state = aiPMState.state
+        let settings = state.settings
         let interval = settings.cadence.intervalSeconds ?? 0
         guard interval > 0 else { return 0 }
+        guard state.consecutiveRunFailures < settings.maximumConsecutiveFailures else { return 0 }
         guard llmConfiguration.status.isAvailable else { return interval }
-        if let nextRunAt = aiPMState.state.nextRunAt {
+        if let nextRunAt = state.nextRunAt {
             return max(nextRunAt.timeIntervalSinceNow, 15)
         }
-        guard let lastRunAt = aiPMState.state.lastRunAt else { return 15 }
+        guard let lastRunAt = state.lastRunAt else { return 15 }
         return max(lastRunAt.addingTimeInterval(interval).timeIntervalSinceNow, 15)
     }
 

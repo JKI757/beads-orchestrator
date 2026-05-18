@@ -237,6 +237,7 @@ struct AIPMAutomationSettings: Codable, Equatable {
     var generatesReports: Bool
     var maximumProposals: Int
     var maximumActionsPerProposal: Int
+    var maximumConsecutiveFailures: Int
     var requiresHighRiskApproval: Bool
     var sendsNotifications: Bool
     var notifiesHighRiskProposals: Bool
@@ -250,6 +251,7 @@ struct AIPMAutomationSettings: Codable, Equatable {
         generatesReports: Bool = true,
         maximumProposals: Int = 8,
         maximumActionsPerProposal: Int = 5,
+        maximumConsecutiveFailures: Int = 3,
         requiresHighRiskApproval: Bool = true,
         sendsNotifications: Bool = false,
         notifiesHighRiskProposals: Bool = true,
@@ -262,6 +264,7 @@ struct AIPMAutomationSettings: Codable, Equatable {
         self.generatesReports = generatesReports
         self.maximumProposals = maximumProposals
         self.maximumActionsPerProposal = maximumActionsPerProposal
+        self.maximumConsecutiveFailures = maximumConsecutiveFailures
         self.requiresHighRiskApproval = requiresHighRiskApproval
         self.sendsNotifications = sendsNotifications
         self.notifiesHighRiskProposals = notifiesHighRiskProposals
@@ -276,6 +279,7 @@ struct AIPMAutomationSettings: Codable, Equatable {
         case generatesReports
         case maximumProposals
         case maximumActionsPerProposal
+        case maximumConsecutiveFailures
         case requiresHighRiskApproval
         case sendsNotifications
         case notifiesHighRiskProposals
@@ -291,6 +295,7 @@ struct AIPMAutomationSettings: Codable, Equatable {
         generatesReports = try container.decodeIfPresent(Bool.self, forKey: .generatesReports) ?? true
         maximumProposals = try container.decodeIfPresent(Int.self, forKey: .maximumProposals) ?? 8
         maximumActionsPerProposal = try container.decodeIfPresent(Int.self, forKey: .maximumActionsPerProposal) ?? 5
+        maximumConsecutiveFailures = try container.decodeIfPresent(Int.self, forKey: .maximumConsecutiveFailures) ?? 3
         requiresHighRiskApproval = try container.decodeIfPresent(Bool.self, forKey: .requiresHighRiskApproval) ?? true
         sendsNotifications = try container.decodeIfPresent(Bool.self, forKey: .sendsNotifications) ?? false
         notifiesHighRiskProposals = try container.decodeIfPresent(Bool.self, forKey: .notifiesHighRiskProposals) ?? true
@@ -362,6 +367,7 @@ struct AIPMState: Codable, Equatable {
     var proposals: [AIPMDecisionProposal]
     var reports: [AIPMReportSnapshot]
     var auditEvents: [AIPMAuditEvent]
+    var consecutiveRunFailures: Int
     var updatedAt: Date
 
     init(
@@ -374,6 +380,7 @@ struct AIPMState: Codable, Equatable {
         proposals: [AIPMDecisionProposal] = [],
         reports: [AIPMReportSnapshot] = [],
         auditEvents: [AIPMAuditEvent] = [],
+        consecutiveRunFailures: Int = 0,
         updatedAt: Date = .now
     ) {
         self.settings = settings
@@ -385,6 +392,7 @@ struct AIPMState: Codable, Equatable {
         self.proposals = proposals
         self.reports = reports
         self.auditEvents = auditEvents
+        self.consecutiveRunFailures = consecutiveRunFailures
         self.updatedAt = updatedAt
     }
 
@@ -414,6 +422,7 @@ struct AIPMState: Codable, Equatable {
         case proposals
         case reports
         case auditEvents
+        case consecutiveRunFailures
         case updatedAt
     }
 
@@ -428,6 +437,7 @@ struct AIPMState: Codable, Equatable {
         proposals = try container.decodeIfPresent([AIPMDecisionProposal].self, forKey: .proposals) ?? []
         reports = try container.decodeIfPresent([AIPMReportSnapshot].self, forKey: .reports) ?? []
         auditEvents = try container.decodeIfPresent([AIPMAuditEvent].self, forKey: .auditEvents) ?? []
+        consecutiveRunFailures = try container.decodeIfPresent(Int.self, forKey: .consecutiveRunFailures) ?? 0
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
     }
 }
@@ -1313,6 +1323,7 @@ final class AIPMStateStore: ObservableObject {
         nextState.lastRunAt = .now
         nextState.lastRunSummary = summary
         nextState.lastRunError = nil
+        nextState.consecutiveRunFailures = 0
         nextState.latestIntelligence = intelligence
         nextState.proposals = Array((proposals + nextState.proposals).prefix(40))
         if let report {
@@ -1337,6 +1348,7 @@ final class AIPMStateStore: ObservableObject {
         var nextState = state
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         nextState.lastRunError = trimmedMessage.isEmpty ? nil : trimmedMessage
+        nextState.consecutiveRunFailures += 1
         nextState.auditEvents = prependingAuditEvent(
             AIPMAuditEvent(
                 kind: .runFailed,
@@ -1411,6 +1423,7 @@ final class AIPMStateStore: ObservableObject {
         var settings = settings
         settings.maximumProposals = min(max(settings.maximumProposals, 1), 20)
         settings.maximumActionsPerProposal = min(max(settings.maximumActionsPerProposal, 1), 12)
+        settings.maximumConsecutiveFailures = min(max(settings.maximumConsecutiveFailures, 1), 10)
         if !settings.sendsNotifications {
             settings.notifiesHighRiskProposals = false
             settings.notifiesRunFailures = false
@@ -1442,6 +1455,7 @@ final class AIPMStateStore: ObservableObject {
 
     private func nextScheduledRunDate(for state: AIPMState) -> Date? {
         guard state.settings.isEnabled, let interval = state.settings.cadence.intervalSeconds else { return nil }
+        guard state.consecutiveRunFailures < state.settings.maximumConsecutiveFailures else { return nil }
         guard let lastRunAt = state.lastRunAt else { return Date().addingTimeInterval(15) }
         return max(lastRunAt.addingTimeInterval(interval), Date().addingTimeInterval(15))
     }

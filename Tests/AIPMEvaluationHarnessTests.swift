@@ -316,6 +316,7 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertTrue(settings.notifiesHighRiskProposals)
         XCTAssertTrue(settings.notifiesRunFailures)
         XCTAssertEqual(settings.maximumActionsPerProposal, 5)
+        XCTAssertEqual(settings.maximumConsecutiveFailures, 3)
         XCTAssertTrue(settings.requiresHighRiskApproval)
 
         let state = AIPMState(proposals: [
@@ -380,6 +381,36 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
             selectedChangeCount: 1,
             hasExplicitApproval: true
         ))
+    }
+
+    func testAIPMSchedulerPausesAfterBoundedFailuresAndResumesAfterSuccess() {
+        let stateURL = temporaryFile("pm-state.json")
+        let store = AIPMStateStore(persistenceURL: stateURL)
+        store.saveSettings(AIPMAutomationSettings(
+            isEnabled: true,
+            cadence: .hourly,
+            maximumConsecutiveFailures: 2
+        ))
+
+        XCTAssertNotNil(store.state.nextRunAt)
+
+        store.recordRunFailure("Provider offline")
+        XCTAssertEqual(store.state.consecutiveRunFailures, 1)
+        XCTAssertNotNil(store.state.nextRunAt)
+
+        store.recordRunFailure("Provider still offline")
+        XCTAssertEqual(store.state.consecutiveRunFailures, 2)
+        XCTAssertNil(store.state.nextRunAt)
+
+        store.recordRun(
+            summary: "Recovered.",
+            proposals: [],
+            report: nil,
+            intelligence: nil
+        )
+
+        XCTAssertEqual(store.state.consecutiveRunFailures, 0)
+        XCTAssertNotNil(store.state.nextRunAt)
     }
 
     func testAIPMReportSnapshotDecodesLegacyReportAndPersistsDeltas() throws {
