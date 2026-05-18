@@ -236,6 +236,9 @@ struct AIPMAutomationSettings: Codable, Equatable {
     var reviewsBacklog: Bool
     var generatesReports: Bool
     var maximumProposals: Int
+    var maximumActionsPerProposal: Int
+    var maximumConsecutiveFailures: Int
+    var requiresHighRiskApproval: Bool
     var sendsNotifications: Bool
     var notifiesHighRiskProposals: Bool
     var notifiesRunFailures: Bool
@@ -247,6 +250,9 @@ struct AIPMAutomationSettings: Codable, Equatable {
         reviewsBacklog: Bool = true,
         generatesReports: Bool = true,
         maximumProposals: Int = 8,
+        maximumActionsPerProposal: Int = 5,
+        maximumConsecutiveFailures: Int = 3,
+        requiresHighRiskApproval: Bool = true,
         sendsNotifications: Bool = false,
         notifiesHighRiskProposals: Bool = true,
         notifiesRunFailures: Bool = true
@@ -257,6 +263,9 @@ struct AIPMAutomationSettings: Codable, Equatable {
         self.reviewsBacklog = reviewsBacklog
         self.generatesReports = generatesReports
         self.maximumProposals = maximumProposals
+        self.maximumActionsPerProposal = maximumActionsPerProposal
+        self.maximumConsecutiveFailures = maximumConsecutiveFailures
+        self.requiresHighRiskApproval = requiresHighRiskApproval
         self.sendsNotifications = sendsNotifications
         self.notifiesHighRiskProposals = notifiesHighRiskProposals
         self.notifiesRunFailures = notifiesRunFailures
@@ -269,6 +278,9 @@ struct AIPMAutomationSettings: Codable, Equatable {
         case reviewsBacklog
         case generatesReports
         case maximumProposals
+        case maximumActionsPerProposal
+        case maximumConsecutiveFailures
+        case requiresHighRiskApproval
         case sendsNotifications
         case notifiesHighRiskProposals
         case notifiesRunFailures
@@ -282,6 +294,9 @@ struct AIPMAutomationSettings: Codable, Equatable {
         reviewsBacklog = try container.decodeIfPresent(Bool.self, forKey: .reviewsBacklog) ?? true
         generatesReports = try container.decodeIfPresent(Bool.self, forKey: .generatesReports) ?? true
         maximumProposals = try container.decodeIfPresent(Int.self, forKey: .maximumProposals) ?? 8
+        maximumActionsPerProposal = try container.decodeIfPresent(Int.self, forKey: .maximumActionsPerProposal) ?? 5
+        maximumConsecutiveFailures = try container.decodeIfPresent(Int.self, forKey: .maximumConsecutiveFailures) ?? 3
+        requiresHighRiskApproval = try container.decodeIfPresent(Bool.self, forKey: .requiresHighRiskApproval) ?? true
         sendsNotifications = try container.decodeIfPresent(Bool.self, forKey: .sendsNotifications) ?? false
         notifiesHighRiskProposals = try container.decodeIfPresent(Bool.self, forKey: .notifiesHighRiskProposals) ?? true
         notifiesRunFailures = try container.decodeIfPresent(Bool.self, forKey: .notifiesRunFailures) ?? true
@@ -336,6 +351,10 @@ enum AIPMAutonomyLevel: String, Codable, CaseIterable, Identifiable {
             "Autonomous Proposals"
         }
     }
+
+    var permitsDraftChanges: Bool {
+        self == .autonomousProposals
+    }
 }
 
 struct AIPMState: Codable, Equatable {
@@ -348,6 +367,7 @@ struct AIPMState: Codable, Equatable {
     var proposals: [AIPMDecisionProposal]
     var reports: [AIPMReportSnapshot]
     var auditEvents: [AIPMAuditEvent]
+    var consecutiveRunFailures: Int
     var updatedAt: Date
 
     init(
@@ -360,6 +380,7 @@ struct AIPMState: Codable, Equatable {
         proposals: [AIPMDecisionProposal] = [],
         reports: [AIPMReportSnapshot] = [],
         auditEvents: [AIPMAuditEvent] = [],
+        consecutiveRunFailures: Int = 0,
         updatedAt: Date = .now
     ) {
         self.settings = settings
@@ -371,6 +392,7 @@ struct AIPMState: Codable, Equatable {
         self.proposals = proposals
         self.reports = reports
         self.auditEvents = auditEvents
+        self.consecutiveRunFailures = consecutiveRunFailures
         self.updatedAt = updatedAt
     }
 
@@ -400,6 +422,7 @@ struct AIPMState: Codable, Equatable {
         case proposals
         case reports
         case auditEvents
+        case consecutiveRunFailures
         case updatedAt
     }
 
@@ -414,6 +437,7 @@ struct AIPMState: Codable, Equatable {
         proposals = try container.decodeIfPresent([AIPMDecisionProposal].self, forKey: .proposals) ?? []
         reports = try container.decodeIfPresent([AIPMReportSnapshot].self, forKey: .reports) ?? []
         auditEvents = try container.decodeIfPresent([AIPMAuditEvent].self, forKey: .auditEvents) ?? []
+        consecutiveRunFailures = try container.decodeIfPresent(Int.self, forKey: .consecutiveRunFailures) ?? 0
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
     }
 }
@@ -483,6 +507,7 @@ enum AIPMProposalStatus: String, Codable, CaseIterable, Identifiable {
     case pending
     case accepted
     case dismissed
+    case deferred
 
     var id: String {
         rawValue
@@ -597,6 +622,7 @@ struct AIPMAuditEvent: Codable, Equatable, Identifiable {
     var proposalID: AIPMDecisionProposal.ID?
     var proposalTitle: String?
     var change: BeadPlanReviewChange?
+    var rollbackChange: BeadPlanReviewChange?
     var resultStatus: String?
     var resultMessage: String?
     var createdAt: Date
@@ -609,6 +635,7 @@ struct AIPMAuditEvent: Codable, Equatable, Identifiable {
         proposalID: AIPMDecisionProposal.ID? = nil,
         proposalTitle: String? = nil,
         change: BeadPlanReviewChange? = nil,
+        rollbackChange: BeadPlanReviewChange? = nil,
         resultStatus: String? = nil,
         resultMessage: String? = nil,
         createdAt: Date = .now
@@ -620,6 +647,7 @@ struct AIPMAuditEvent: Codable, Equatable, Identifiable {
         self.proposalID = proposalID
         self.proposalTitle = proposalTitle
         self.change = change
+        self.rollbackChange = rollbackChange
         self.resultStatus = resultStatus
         self.resultMessage = resultMessage
         self.createdAt = createdAt
@@ -631,6 +659,7 @@ enum AIPMAuditEventKind: String, Codable, CaseIterable, Identifiable {
     case runFailed
     case proposalStatusChanged
     case proposalActionApplied
+    case proposalActionRolledBack
 
     var id: String {
         rawValue
@@ -646,6 +675,8 @@ enum AIPMAuditEventKind: String, Codable, CaseIterable, Identifiable {
             "Decision Updated"
         case .proposalActionApplied:
             "Action Applied"
+        case .proposalActionRolledBack:
+            "Action Rolled Back"
         }
     }
 }
@@ -1236,7 +1267,9 @@ private enum LLMEndpointDiscoveryError: LocalizedError {
 private final class AIPMLocalNotifier {
     static let shared = AIPMLocalNotifier()
 
-    private init() {}
+    private init() {
+        UNUserNotificationCenter.current().delegate = AIPMNotificationRouter.shared
+    }
 
     func deliver(identifier: String, title: String, body: String) {
         let center = UNUserNotificationCenter.current()
@@ -1262,7 +1295,34 @@ private final class AIPMLocalNotifier {
         content.title = title
         content.body = body
         content.sound = .default
+        content.userInfo = ["route": "ai-pm"]
         center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
+    }
+}
+
+extension Notification.Name {
+    static let openAIPMWorkspace = Notification.Name("openAIPMWorkspace")
+}
+
+private final class AIPMNotificationRouter: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = AIPMNotificationRouter()
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let route = response.notification.request.content.userInfo["route"] as? String
+        guard route == "ai-pm" else { return }
+        await MainActor.run {
+            NotificationCenter.default.post(name: .openAIPMWorkspace, object: nil)
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 }
 #endif
@@ -1299,6 +1359,7 @@ final class AIPMStateStore: ObservableObject {
         nextState.lastRunAt = .now
         nextState.lastRunSummary = summary
         nextState.lastRunError = nil
+        nextState.consecutiveRunFailures = 0
         nextState.latestIntelligence = intelligence
         nextState.proposals = Array((proposals + nextState.proposals).prefix(40))
         if let report {
@@ -1323,6 +1384,7 @@ final class AIPMStateStore: ObservableObject {
         var nextState = state
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         nextState.lastRunError = trimmedMessage.isEmpty ? nil : trimmedMessage
+        nextState.consecutiveRunFailures += 1
         nextState.auditEvents = prependingAuditEvent(
             AIPMAuditEvent(
                 kind: .runFailed,
@@ -1371,6 +1433,7 @@ final class AIPMStateStore: ObservableObject {
     func recordActionApplication(
         proposal: AIPMDecisionProposal,
         change: BeadPlanReviewChange,
+        rollbackChange: BeadPlanReviewChange?,
         resultStatus: String,
         resultMessage: String
     ) {
@@ -1383,6 +1446,31 @@ final class AIPMStateStore: ObservableObject {
                 proposalID: proposal.id,
                 proposalTitle: proposal.title,
                 change: change,
+                rollbackChange: rollbackChange,
+                resultStatus: resultStatus,
+                resultMessage: resultMessage
+            ),
+            to: nextState.auditEvents
+        )
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    func recordRollback(
+        event: AIPMAuditEvent,
+        resultStatus: String,
+        resultMessage: String
+    ) {
+        var nextState = state
+        nextState.auditEvents = prependingAuditEvent(
+            AIPMAuditEvent(
+                kind: .proposalActionRolledBack,
+                actor: "User",
+                summary: "Rolled back \(event.summary)",
+                proposalID: event.proposalID,
+                proposalTitle: event.proposalTitle,
+                change: event.rollbackChange,
                 resultStatus: resultStatus,
                 resultMessage: resultMessage
             ),
@@ -1396,6 +1484,8 @@ final class AIPMStateStore: ObservableObject {
     private func sanitized(_ settings: AIPMAutomationSettings) -> AIPMAutomationSettings {
         var settings = settings
         settings.maximumProposals = min(max(settings.maximumProposals, 1), 20)
+        settings.maximumActionsPerProposal = min(max(settings.maximumActionsPerProposal, 1), 12)
+        settings.maximumConsecutiveFailures = min(max(settings.maximumConsecutiveFailures, 1), 10)
         if !settings.sendsNotifications {
             settings.notifiesHighRiskProposals = false
             settings.notifiesRunFailures = false
@@ -1427,6 +1517,7 @@ final class AIPMStateStore: ObservableObject {
 
     private func nextScheduledRunDate(for state: AIPMState) -> Date? {
         guard state.settings.isEnabled, let interval = state.settings.cadence.intervalSeconds else { return nil }
+        guard state.consecutiveRunFailures < state.settings.maximumConsecutiveFailures else { return nil }
         guard let lastRunAt = state.lastRunAt else { return Date().addingTimeInterval(15) }
         return max(lastRunAt.addingTimeInterval(interval), Date().addingTimeInterval(15))
     }

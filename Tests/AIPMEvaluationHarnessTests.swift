@@ -92,6 +92,21 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         let moved = store.bead(beadsID: fixture.implementation.relationshipID)
         XCTAssertEqual(moved?.status, "Blocked")
         XCTAssertTrue(store.selectedBoard?.columns.first { $0.name == "Blocked" }?.beads.contains { $0.relationshipID == fixture.implementation.relationshipID } == true)
+        XCTAssertNotNil(setStatusResult.rollbackChange)
+
+        let rollbackEvent = AIPMAuditEvent(
+            kind: .proposalActionApplied,
+            summary: "Set status for proposal",
+            change: setStatusResult.change,
+            rollbackChange: setStatusResult.rollbackChange,
+            resultStatus: "applied",
+            resultMessage: setStatusResult.message
+        )
+        let rollbackResult = store.rollback(rollbackEvent)
+
+        XCTAssertEqual(rollbackResult?.status, .applied)
+        XCTAssertEqual(store.bead(beadsID: fixture.implementation.relationshipID)?.status, "In Progress")
+        XCTAssertTrue(store.selectedBoard?.columns.first { $0.name == "In Progress" }?.beads.contains { $0.relationshipID == fixture.implementation.relationshipID } == true)
 
         let blockedResult = store.apply(BeadPlanReviewChange(
             kind: .setBlocked,
@@ -315,6 +330,9 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertFalse(settings.sendsNotifications)
         XCTAssertTrue(settings.notifiesHighRiskProposals)
         XCTAssertTrue(settings.notifiesRunFailures)
+        XCTAssertEqual(settings.maximumActionsPerProposal, 5)
+        XCTAssertEqual(settings.maximumConsecutiveFailures, 3)
+        XCTAssertTrue(settings.requiresHighRiskApproval)
 
         let state = AIPMState(proposals: [
             AIPMDecisionProposal(
@@ -328,6 +346,86 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertEqual(state.unreadDecisionCount, 1)
         XCTAssertEqual(state.highRiskPendingProposals.count, 1)
         XCTAssertTrue(state.needsAttention)
+    }
+
+    func testAIPMSafetyPolicyRejectsUnsafeAutonomousApplication() {
+        let server = BeadsHTTPServer(
+            llmConfiguration: LLMServerConfigurationStore(persistenceURL: temporaryFile("llm.json")),
+            aiPMState: AIPMStateStore(persistenceURL: temporaryFile("pm-state.json"))
+        )
+        let proposal = AIPMDecisionProposal(
+            title: "Resolve launch risk",
+            summary: "Move risky work forward.",
+            category: .risk,
+            risk: .high,
+            rationale: "Launch scope is blocked.",
+            changes: [
+                BeadPlanReviewChange(kind: .setBlocked, targetBeadsID: "task-1", field: nil, value: "true", title: nil, summary: nil, notes: nil, labels: nil, priority: nil, issueType: nil, rationale: "Mark blocked."),
+                BeadPlanReviewChange(kind: .setStatus, targetBeadsID: "task-1", field: nil, value: "Blocked", title: nil, summary: nil, notes: nil, labels: nil, priority: nil, issueType: nil, rationale: "Move to blocked.")
+            ]
+        )
+
+        server.saveAIPMSettings(AIPMAutomationSettings(
+            autonomyLevel: .surfaceDecisions,
+            maximumActionsPerProposal: 1,
+            requiresHighRiskApproval: true
+        ))
+        XCTAssertNotNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 1,
+            hasExplicitApproval: true
+        ))
+
+        server.saveAIPMSettings(AIPMAutomationSettings(
+            autonomyLevel: .autonomousProposals,
+            maximumActionsPerProposal: 1,
+            requiresHighRiskApproval: true
+        ))
+        XCTAssertNotNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 2,
+            hasExplicitApproval: true
+        ))
+        XCTAssertNotNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 1,
+            hasExplicitApproval: false
+        ))
+        XCTAssertNil(server.aipmSafetyRejection(
+            proposal: proposal,
+            selectedChangeCount: 1,
+            hasExplicitApproval: true
+        ))
+    }
+
+    func testAIPMSchedulerPausesAfterBoundedFailuresAndResumesAfterSuccess() {
+        let stateURL = temporaryFile("pm-state.json")
+        let store = AIPMStateStore(persistenceURL: stateURL)
+        store.saveSettings(AIPMAutomationSettings(
+            isEnabled: true,
+            cadence: .hourly,
+            maximumConsecutiveFailures: 2
+        ))
+
+        XCTAssertNotNil(store.state.nextRunAt)
+
+        store.recordRunFailure("Provider offline")
+        XCTAssertEqual(store.state.consecutiveRunFailures, 1)
+        XCTAssertNotNil(store.state.nextRunAt)
+
+        store.recordRunFailure("Provider still offline")
+        XCTAssertEqual(store.state.consecutiveRunFailures, 2)
+        XCTAssertNil(store.state.nextRunAt)
+
+        store.recordRun(
+            summary: "Recovered.",
+            proposals: [],
+            report: nil,
+            intelligence: nil
+        )
+
+        XCTAssertEqual(store.state.consecutiveRunFailures, 0)
+        XCTAssertNotNil(store.state.nextRunAt)
     }
 
     func testAIPMReportSnapshotDecodesLegacyReportAndPersistsDeltas() throws {

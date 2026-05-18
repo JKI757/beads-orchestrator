@@ -49,6 +49,15 @@ struct RootView: View {
                     BoardView(board: board, presentation: .mac)
                 case .hierarchy:
                     HierarchyView(board: board, presentation: .mac)
+                case .aiPM:
+                    #if os(macOS)
+                    AIPMWorkspaceView(
+                        pmState: server.aiPMState,
+                        openLLMSettings: { showingLLMSettings = true }
+                    )
+                    #else
+                    RemoteAIPMWorkspaceView()
+                    #endif
                 }
             } else {
                 ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
@@ -57,6 +66,11 @@ struct RootView: View {
             BeadDetailView(bead: store.selectedBead)
         }
         .searchable(text: $store.searchText, prompt: "Search beads")
+        #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: .openAIPMWorkspace)) { _ in
+            workspaceMode = .aiPM
+        }
+        #endif
         .toolbar {
             ToolbarItemGroup {
                 WorkspaceModePicker(selection: $workspaceMode)
@@ -228,6 +242,7 @@ struct RootView: View {
 private enum WorkspaceMode: String, CaseIterable, Identifiable {
     case board
     case hierarchy
+    case aiPM
 
     var id: String {
         rawValue
@@ -237,6 +252,7 @@ private enum WorkspaceMode: String, CaseIterable, Identifiable {
         switch self {
         case .board: "Board"
         case .hierarchy: "Hierarchy"
+        case .aiPM: "AI PM"
         }
     }
 
@@ -244,6 +260,7 @@ private enum WorkspaceMode: String, CaseIterable, Identifiable {
         switch self {
         case .board: "rectangle.3.group"
         case .hierarchy: "list.bullet.indent"
+        case .aiPM: "sparkles"
         }
     }
 }
@@ -258,7 +275,7 @@ private struct WorkspaceModePicker: View {
             }
         }
         .pickerStyle(.segmented)
-        .frame(width: 188)
+        .frame(width: 258)
     }
 }
 
@@ -366,6 +383,8 @@ private struct TabletPortraitWorkspace: View {
                     BoardView(board: board, presentation: .tabletPortrait)
                 case .hierarchy:
                     HierarchyView(board: board, presentation: .tabletPortrait)
+                case .aiPM:
+                    RemoteAIPMWorkspaceView()
                 }
             } else {
                 ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create or connect a repository to start tracking beads."))
@@ -418,6 +437,9 @@ private struct TabletLandscapeWorkspace: View {
                             .frame(maxWidth: .infinity)
                     case .hierarchy:
                         HierarchyView(board: board, presentation: .tabletLandscape)
+                            .frame(maxWidth: .infinity)
+                    case .aiPM:
+                        RemoteAIPMWorkspaceView()
                             .frame(maxWidth: .infinity)
                     }
                 } else {
@@ -500,6 +522,8 @@ private struct CompactRootView: View {
                         CompactBoardView(board: board, selectedColumnID: $selectedColumnID)
                     case .hierarchy:
                         HierarchyView(board: board, presentation: .compact)
+                    case .aiPM:
+                        RemoteAIPMWorkspaceView()
                     }
                 } else {
                     ContentUnavailableView("No Board", systemImage: "rectangle.3.group", description: Text("Create a board to start tracking beads."))
@@ -1185,490 +1209,6 @@ private struct LLMSettingsSheet: View {
     }
 }
 
-private struct AIPMDashboardSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var server: BeadsHTTPServer
-    @EnvironmentObject private var store: BoardStore
-    @ObservedObject var pmState: AIPMStateStore
-
-    @State private var draft = AIPMAutomationSettings()
-    @State private var isRunning = false
-    @State private var errorMessage: String?
-    @State private var proposalToApply: AIPMDecisionProposal?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                Section("Automation") {
-                    Toggle("AI PM enabled", isOn: $draft.isEnabled)
-
-                    Picker("Cadence", selection: $draft.cadence) {
-                        ForEach(AIPMCadence.allCases) { cadence in
-                            Text(cadence.displayName).tag(cadence)
-                        }
-                    }
-
-                    Picker("Autonomy", selection: $draft.autonomyLevel) {
-                        ForEach(AIPMAutonomyLevel.allCases) { autonomy in
-                            Text(autonomy.displayName).tag(autonomy)
-                        }
-                    }
-
-                    Toggle("Review backlog", isOn: $draft.reviewsBacklog)
-                    Toggle("Generate status reports", isOn: $draft.generatesReports)
-
-                    Stepper(value: $draft.maximumProposals, in: 1...20) {
-                        LabeledContent("Maximum proposals", value: "\(draft.maximumProposals)")
-                    }
-                }
-
-                Section("Notifications") {
-                    Toggle("Notify on this Mac", isOn: $draft.sendsNotifications)
-                    Toggle("High-risk proposals", isOn: $draft.notifiesHighRiskProposals)
-                        .disabled(!draft.sendsNotifications)
-                    Toggle("Run failures", isOn: $draft.notifiesRunFailures)
-                        .disabled(!draft.sendsNotifications)
-                    Text("Notifications point back to the AI PM dashboard so decisions stay reviewable in the canonical server state.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Status") {
-                    LabeledContent("Last run", value: lastRunText)
-                    LabeledContent("Next run", value: nextRunText)
-                    if let summary = pmState.state.lastRunSummary, !summary.isEmpty {
-                        Text(summary)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let error = pmState.state.lastRunError, !error.isEmpty {
-                        Text(error)
-                            .foregroundStyle(.red)
-                    }
-                    LabeledContent("Pending decisions", value: "\(pmState.state.pendingProposals.count)")
-                    Text(server.llmConfiguration.status.message)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let errorMessage {
-                    Section("Run Error") {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Section("Project Intelligence") {
-                    if let intelligence = pmState.state.latestIntelligence {
-                        AIPMProjectIntelligenceView(intelligence: intelligence)
-                    } else {
-                        Text("No project intelligence generated yet.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Pending Decisions") {
-                    if pmState.state.pendingProposals.isEmpty {
-                        Text("No pending decisions.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(pmState.state.pendingProposals) { proposal in
-                            AIPMProposalRow(
-                                proposal: proposal,
-                                applyProposal: {
-                                    if proposal.changes.isEmpty {
-                                        pmState.updateProposal(proposal.id, status: .accepted)
-                                    } else {
-                                        proposalToApply = proposal
-                                    }
-                                },
-                                updateStatus: { status in
-                                    pmState.updateProposal(proposal.id, status: status)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Section("Recent Reports") {
-                    if pmState.state.reports.isEmpty {
-                        Text("No reports generated yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(pmState.state.reports.prefix(5)) { report in
-                            AIPMReportRow(report: report)
-                        }
-                    }
-                }
-
-                Section("Audit History") {
-                    if pmState.state.auditEvents.isEmpty {
-                        Text("No audit events yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(pmState.state.auditEvents.prefix(8)) { event in
-                            AIPMAuditEventRow(event: event)
-                        }
-                    }
-                }
-            }
-            .formStyle(.grouped)
-
-            Divider()
-
-            HStack {
-                Button("Run Now") {
-                    Task { await runPM() }
-                }
-                .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
-
-                if isRunning {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-
-                Spacer()
-
-                Button("Cancel") {
-                    dismiss()
-                }
-
-                Button("Save") {
-                    save()
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding()
-        }
-        .navigationTitle("AI PM")
-        .frame(width: 640)
-        .frame(minHeight: 620)
-        .onAppear {
-            draft = pmState.state.settings
-        }
-        .sheet(item: $proposalToApply) { proposal in
-            AIPMProposalApplySheet(proposal: proposal) { status in
-                pmState.updateProposal(proposal.id, status: status)
-            }
-            .environmentObject(store)
-        }
-    }
-
-    private var lastRunText: String {
-        guard let date = pmState.state.lastRunAt else { return "Never" }
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private var nextRunText: String {
-        guard pmState.state.settings.isEnabled, pmState.state.settings.cadence != .manual else { return "Not scheduled" }
-        guard let date = pmState.state.nextRunAt else { return "Pending" }
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private func save() {
-        server.saveAIPMSettings(draft)
-        draft = pmState.state.settings
-    }
-
-    private func runPM() async {
-        save()
-        isRunning = true
-        errorMessage = nil
-        defer { isRunning = false }
-
-        do {
-            _ = try await server.runAIPM()
-            draft = pmState.state.settings
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-}
-
-private struct AIPMProposalRow: View {
-    let proposal: AIPMDecisionProposal
-    var applyProposal: () -> Void
-    var updateStatus: (AIPMProposalStatus) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(proposal.title)
-                    .font(.headline)
-                Spacer()
-                Text(proposal.category.displayName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(proposal.risk.rawValue.capitalized)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(riskColor)
-            }
-
-            Text(proposal.summary)
-                .foregroundStyle(.secondary)
-            Text(proposal.rationale)
-                .font(.callout)
-
-            if !proposal.changes.isEmpty {
-                Text("\(proposal.changes.count) proposed change\(proposal.changes.count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Button(proposal.changes.isEmpty ? "Mark Accepted" : "Review & Apply") {
-                    applyProposal()
-                }
-                Button("Dismiss") {
-                    updateStatus(.dismissed)
-                }
-            }
-            .buttonStyle(.borderless)
-        }
-        .padding(.vertical, 6)
-    }
-
-    private var riskColor: Color {
-        switch proposal.risk {
-        case .low:
-            .secondary
-        case .medium:
-            .orange
-        case .high:
-            .red
-        }
-    }
-}
-
-private struct AIPMProposalApplySheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var server: BeadsHTTPServer
-    @EnvironmentObject private var store: BoardStore
-
-    let proposal: AIPMDecisionProposal
-    var updateStatus: (AIPMProposalStatus) -> Void
-
-    @State private var selectedChangeIndexes: Set<Int> = []
-    @State private var results: [BeadChangeApplicationResult] = []
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                Section("Proposal") {
-                    Text(proposal.title)
-                        .font(.headline)
-                    Text(proposal.summary)
-                        .foregroundStyle(.secondary)
-                    Text(proposal.rationale)
-                }
-
-                Section("Changes") {
-                    ForEach(Array(proposal.changes.enumerated()), id: \.offset) { index, change in
-                        Toggle(isOn: Binding(
-                            get: { selectedChangeIndexes.contains(index) },
-                            set: { isSelected in
-                                if isSelected {
-                                    selectedChangeIndexes.insert(index)
-                                } else {
-                                    selectedChangeIndexes.remove(index)
-                                }
-                            }
-                        )) {
-                            AIPMChangeSummary(change: change)
-                        }
-                    }
-                }
-
-                if !results.isEmpty {
-                    Section("Results") {
-                        ForEach(results) { result in
-                            Label(result.message, systemImage: result.status.systemImage)
-                                .foregroundStyle(result.status.color)
-                        }
-                    }
-                }
-            }
-            .formStyle(.grouped)
-
-            Divider()
-
-            HStack {
-                Button(results.isEmpty ? "Cancel" : "Done") {
-                    dismiss()
-                }
-
-                Spacer()
-
-                Button("Apply Selected") {
-                    applySelectedChanges()
-                }
-                .disabled(selectedChangeIndexes.isEmpty)
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding()
-        }
-        .navigationTitle("Apply Proposal")
-        .frame(width: 560)
-        .frame(minHeight: 520)
-        .onAppear {
-            selectedChangeIndexes = Set(proposal.changes.indices)
-        }
-    }
-
-    private func applySelectedChanges() {
-        results = selectedChangeIndexes
-            .sorted()
-            .map { store.apply(proposal.changes[$0]) }
-        for result in results {
-            server.aiPMState.recordActionApplication(
-                proposal: proposal,
-                change: result.change,
-                resultStatus: result.status.auditValue,
-                resultMessage: result.message
-            )
-        }
-
-        if results.allSatisfy({ $0.status != .failed }) {
-            updateStatus(.accepted)
-        }
-    }
-}
-
-private struct AIPMChangeSummary: View {
-    let change: BeadPlanReviewChange
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label(change.kind.displayName, systemImage: icon)
-                .font(.caption.weight(.semibold))
-
-            Text(primaryText)
-                .font(.callout.weight(.semibold))
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text(change.rationale)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var primaryText: String {
-        switch change.kind {
-        case .updateField:
-            "\(change.field?.displayName ?? "Field"): \(change.value ?? "")"
-        case .createBead:
-            change.title ?? "Create bead"
-        case .createChildBead:
-            change.title ?? "Create child bead"
-        case .addDependency:
-            "Depend on \(change.value ?? "selected bead")"
-        case .setParent:
-            "Set parent to \(change.value ?? "selected bead")"
-        case .setStatus:
-            "Set status to \(change.value ?? "selected status")"
-        case .setBlocked:
-            boolText("Blocked", value: change.value, defaultValue: true)
-        case .setStale:
-            boolText("Stale", value: change.value, defaultValue: true)
-        }
-    }
-
-    private var icon: String {
-        switch change.kind {
-        case .updateField:
-            "square.and.pencil"
-        case .createBead:
-            "plus.square"
-        case .createChildBead:
-            "plus.square.on.square"
-        case .addDependency:
-            "link"
-        case .setParent:
-            "arrowshape.turn.up.left"
-        case .setStatus:
-            "arrow.left.arrow.right"
-        case .setBlocked:
-            "exclamationmark.octagon"
-        case .setStale:
-            "clock.badge.exclamationmark"
-        }
-    }
-
-    private func boolText(_ label: String, value: String?, defaultValue: Bool) -> String {
-        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let isOn = normalized.map { !["false", "no", "0", "unblocked", "active"].contains($0) } ?? defaultValue
-        return "\(isOn ? "Mark" : "Clear") \(label)"
-    }
-}
-
-private extension BeadChangeApplicationStatus {
-    var auditValue: String {
-        switch self {
-        case .applied:
-            "applied"
-        case .skipped:
-            "skipped"
-        case .failed:
-            "failed"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .applied:
-            "checkmark.circle"
-        case .skipped:
-            "minus.circle"
-        case .failed:
-            "exclamationmark.triangle"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .applied:
-            .green
-        case .skipped:
-            .secondary
-        case .failed:
-            .red
-        }
-    }
-}
-
-private struct AIPMReportRow: View {
-    let report: AIPMReportSnapshot
-
-    var body: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(report.summary)
-                    .foregroundStyle(.secondary)
-
-                ForEach(report.sections) { section in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(section.title)
-                            .font(.subheadline.weight(.semibold))
-                        ForEach(section.items, id: \.self) { item in
-                            Text(item)
-                                .font(.callout)
-                        }
-                    }
-                }
-            }
-            .padding(.top, 6)
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(report.title)
-                Text(report.generatedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 private struct PairingCodeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var server: BeadsHTTPServer
@@ -1841,106 +1381,121 @@ private final class QRScannerViewController: UIViewController, AVCaptureMetadata
     }
 }
 
+private struct RemoteAIPMWorkspaceView: View {
+    var body: some View {
+        RemoteAIPMDashboardContent()
+            .navigationTitle("AI PM")
+    }
+}
+
 private struct RemoteAIPMDashboardSheet: View {
     @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            RemoteAIPMDashboardContent()
+                .navigationTitle("AI PM")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
+                }
+        }
+    }
+}
+
+private struct RemoteAIPMDashboardContent: View {
     @EnvironmentObject private var store: BoardStore
     @State private var isRunning = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Status") {
-                    Text(store.remoteAIPMStatusMessage)
-                        .foregroundStyle(.secondary)
+        Form {
+            Section("Status") {
+                Text(store.remoteAIPMStatusMessage)
+                    .foregroundStyle(.secondary)
 
-                    if let state = store.remoteAIPMState {
-                        LabeledContent("Last run", value: lastRunText(for: state))
-                        LabeledContent("Next run", value: nextRunText(for: state))
-                        LabeledContent("Pending decisions", value: "\(state.pendingProposals.count)")
-                        LabeledContent("High-risk decisions", value: "\(state.highRiskPendingProposals.count)")
-                        LabeledContent("Cadence", value: state.settings.cadence.displayName)
-                        LabeledContent("Autonomy", value: state.settings.autonomyLevel.displayName)
-                        if let summary = state.lastRunSummary, !summary.isEmpty {
-                            Text(summary)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let error = state.lastRunError, !error.isEmpty {
-                            Text(error)
-                                .foregroundStyle(.red)
-                        }
-                    }
-                }
-
-                Section("Project Intelligence") {
-                    if let state = store.remoteAIPMState, let intelligence = state.latestIntelligence {
-                        AIPMProjectIntelligenceView(intelligence: intelligence)
-                    } else {
-                        Text("No project intelligence generated yet.")
+                if let state = store.remoteAIPMState {
+                    LabeledContent("Last run", value: lastRunText(for: state))
+                    LabeledContent("Next run", value: nextRunText(for: state))
+                    LabeledContent("Pending decisions", value: "\(state.pendingProposals.count)")
+                    LabeledContent("High-risk decisions", value: "\(state.highRiskPendingProposals.count)")
+                    LabeledContent("Cadence", value: state.settings.cadence.displayName)
+                    LabeledContent("Autonomy", value: state.settings.autonomyLevel.displayName)
+                    if let summary = state.lastRunSummary, !summary.isEmpty {
+                        Text(summary)
                             .foregroundStyle(.secondary)
                     }
-                }
-
-                Section {
-                    Button {
-                        Task { await refresh() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-
-                    Button {
-                        Task { await runPM() }
-                    } label: {
-                        Label("Run AI PM", systemImage: "play.circle")
-                    }
-                    .disabled(isRunning)
-
-                    if isRunning {
-                        ProgressView()
-                    }
-                }
-
-                Section("Pending Decisions") {
-                    if let state = store.remoteAIPMState, !state.pendingProposals.isEmpty {
-                        ForEach(state.pendingProposals) { proposal in
-                            RemoteAIPMProposalRow(proposal: proposal)
-                        }
-                    } else {
-                        Text("No pending decisions.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Recent Reports") {
-                    if let state = store.remoteAIPMState, !state.reports.isEmpty {
-                        ForEach(state.reports.prefix(5)) { report in
-                            RemoteAIPMReportRow(report: report)
-                        }
-                    } else {
-                        Text("No reports generated yet.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Audit History") {
-                    if let state = store.remoteAIPMState, !state.auditEvents.isEmpty {
-                        ForEach(state.auditEvents.prefix(8)) { event in
-                            AIPMAuditEventRow(event: event)
-                        }
-                    } else {
-                        Text("No audit events yet.")
-                            .foregroundStyle(.secondary)
+                    if let error = state.lastRunError, !error.isEmpty {
+                        Text(error)
+                            .foregroundStyle(.red)
                     }
                 }
             }
-            .navigationTitle("AI PM")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
+
+            Section("Project Intelligence") {
+                if let state = store.remoteAIPMState, let intelligence = state.latestIntelligence {
+                    AIPMProjectIntelligenceView(intelligence: intelligence)
+                } else {
+                    Text("No project intelligence generated yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+
+                Button {
+                    Task { await runPM() }
+                } label: {
+                    Label("Run AI PM", systemImage: "play.circle")
+                }
+                .disabled(isRunning)
+
+                if isRunning {
+                    ProgressView()
+                }
+            }
+
+            Section("Pending Decisions") {
+                if let state = store.remoteAIPMState, !state.pendingProposals.isEmpty {
+                    ForEach(state.pendingProposals) { proposal in
+                        RemoteAIPMProposalRow(proposal: proposal)
                     }
+                } else {
+                    Text("No pending decisions.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Recent Reports") {
+                if let state = store.remoteAIPMState, !state.reports.isEmpty {
+                    ForEach(state.reports.prefix(5)) { report in
+                        RemoteAIPMReportRow(report: report)
+                    }
+                } else {
+                    Text("No reports generated yet.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Audit History") {
+                if let state = store.remoteAIPMState, !state.auditEvents.isEmpty {
+                    ForEach(state.auditEvents.prefix(8)) { event in
+                        AIPMAuditEventRow(event: event)
+                    }
+                } else {
+                    Text("No audit events yet.")
+                        .foregroundStyle(.secondary)
                 }
             }
         }
+        .navigationTitle("AI PM")
         .task {
             await refresh()
         }
@@ -2043,106 +1598,6 @@ private struct RemoteAIPMReportRow: View {
     }
 }
 #endif
-
-private struct AIPMProjectIntelligenceView: View {
-    let intelligence: AIPMProjectIntelligenceSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                LabeledContent("Active", value: "\(intelligence.totalActiveBeads)")
-                LabeledContent("Blocked", value: "\(intelligence.blockedBeads)")
-                LabeledContent("Stale", value: "\(intelligence.staleBeads)")
-            }
-            .font(.caption)
-
-            Text("Generated \(intelligence.generatedAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            ForEach(intelligence.signals.prefix(6)) { signal in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(signal.severity.displayName)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(color(for: signal.severity))
-                        Text(signal.category.displayName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(signal.title)
-                        .font(.subheadline.weight(.semibold))
-                    Text(signal.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if !signal.beadIDs.isEmpty {
-                        Text(signal.beadIDs.prefix(6).joined(separator: ", "))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        }
-    }
-
-    private func color(for severity: AIPMProjectSignalSeverity) -> Color {
-        switch severity {
-        case .info:
-            .secondary
-        case .warning:
-            .orange
-        case .critical:
-            .red
-        }
-    }
-}
-
-private struct AIPMAuditEventRow: View {
-    let event: AIPMAuditEvent
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(event.kind.displayName)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(kindColor)
-                Spacer()
-                Text(event.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(event.summary)
-                .font(.subheadline.weight(.semibold))
-            if let message = event.resultMessage, !message.isEmpty {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let change = event.change {
-                Text(change.kind.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var kindColor: Color {
-        switch event.kind {
-        case .runFailed:
-            .red
-        case .proposalActionApplied:
-            .blue
-        case .proposalStatusChanged:
-            .orange
-        case .runCompleted:
-            .secondary
-        }
-    }
-}
 
 private enum BoardEditorMode: Equatable {
     case create

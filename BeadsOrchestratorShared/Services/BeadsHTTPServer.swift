@@ -320,6 +320,30 @@ final class BeadsHTTPServer: ObservableObject {
         return try projectIntelligenceSummary(request: request, store: store)
     }
 
+    func aipmSafetyRejection(
+        proposal: AIPMDecisionProposal,
+        selectedChangeCount: Int,
+        hasExplicitApproval: Bool
+    ) -> String? {
+        let settings = aiPMState.state.settings
+        guard selectedChangeCount > 0 else {
+            return "Select at least one change before applying a proposal."
+        }
+        guard settings.autonomyLevel.permitsDraftChanges else {
+            return "AI PM is set to surface decisions only. Switch autonomy to Autonomous Proposals before applying generated changes."
+        }
+        guard selectedChangeCount <= settings.maximumActionsPerProposal else {
+            return "This proposal selects \(selectedChangeCount) changes, above the current limit of \(settings.maximumActionsPerProposal)."
+        }
+        if settings.requiresHighRiskApproval, proposal.risk == .high, !hasExplicitApproval {
+            return "High-risk proposals require explicit approval before mutation."
+        }
+        if selectedChangeCount > 1, !hasExplicitApproval {
+            return "Broad proposals require explicit approval before mutation."
+        }
+        return nil
+    }
+
     private func restartAutomationLoop() {
         automationTask?.cancel()
         automationTask = nil
@@ -341,14 +365,16 @@ final class BeadsHTTPServer: ObservableObject {
     }
 
     private func automationDelaySeconds() -> TimeInterval {
-        let settings = aiPMState.state.settings
+        let state = aiPMState.state
+        let settings = state.settings
         let interval = settings.cadence.intervalSeconds ?? 0
         guard interval > 0 else { return 0 }
+        guard state.consecutiveRunFailures < settings.maximumConsecutiveFailures else { return 0 }
         guard llmConfiguration.status.isAvailable else { return interval }
-        if let nextRunAt = aiPMState.state.nextRunAt {
+        if let nextRunAt = state.nextRunAt {
             return max(nextRunAt.timeIntervalSinceNow, 15)
         }
-        guard let lastRunAt = aiPMState.state.lastRunAt else { return 15 }
+        guard let lastRunAt = state.lastRunAt else { return 15 }
         return max(lastRunAt.addingTimeInterval(interval).timeIntervalSinceNow, 15)
     }
 
@@ -490,13 +516,17 @@ final class BeadsHTTPServer: ObservableObject {
             let proposals = payload.proposals
                 .prefix(settings.maximumProposals)
                 .map { proposal in
-                    AIPMDecisionProposal(
+                    let changes = aiPMSanitizedChanges(
+                        settings: settings,
+                        changes: proposal.changes ?? []
+                    )
+                    return AIPMDecisionProposal(
                         title: proposal.title,
                         summary: proposal.summary,
                         category: proposal.category,
                         risk: proposal.risk,
                         rationale: proposal.rationale,
-                        changes: proposal.changes ?? []
+                        changes: changes
                     )
                 }
             let deltas = aiPMReportDeltas(
@@ -525,6 +555,14 @@ final class BeadsHTTPServer: ObservableObject {
             llmConfiguration.recordProviderFailure("The provider returned an AI PM run in an unreadable format.")
             throw LLMProviderError.invalidResponse
         }
+    }
+
+    private func aiPMSanitizedChanges(
+        settings: AIPMAutomationSettings,
+        changes: [BeadPlanReviewChange]
+    ) -> [BeadPlanReviewChange] {
+        guard settings.autonomyLevel.permitsDraftChanges else { return [] }
+        return Array(changes.prefix(settings.maximumActionsPerProposal))
     }
 
     private func aiPMBoard(request: AIPMRunRequest, store: BoardStore) throws -> Board {
@@ -1052,8 +1090,10 @@ final class BeadsHTTPServer: ObservableObject {
         - You may autonomously analyze backlog, sequencing, risk, stale work, missing work, handoff quality, and reporting.
         - You must surface decisions as reviewable proposals.
         - Do not silently mutate project state.
-        - When autonomy is surfaceDecisions, focus on decisions and risks with minimal proposed changes.
-        - When autonomy is autonomousProposals, include concrete draft changes that could be applied after review.
+        - When autonomy is surfaceDecisions, focus on decisions and risks and return no concrete changes.
+        - When autonomy is autonomousProposals, include concrete draft changes that could be applied after explicit user review.
+        - High-risk and broad mutation proposals require explicit approval before application.
+        - Never include more than \(settings.maximumActionsPerProposal) changes in a single proposal.
         - Prefer a small number of high-signal proposals over a large backlog of noise.
         - Every proposal should be specific enough for a user to accept, dismiss, or turn into child beads later.
 
@@ -1101,6 +1141,8 @@ final class BeadsHTTPServer: ObservableObject {
         reviewsBacklog=\(settings.reviewsBacklog) \(settings.reviewsBacklog ? "" : "(do not propose backlog expansion unless it blocks active work)")
         generatesReports=\(settings.generatesReports) \(settings.generatesReports ? "" : "(return report as null)")
         maximumProposals=\(settings.maximumProposals)
+        maximumActionsPerProposal=\(settings.maximumActionsPerProposal)
+        requiresHighRiskApproval=\(settings.requiresHighRiskApproval)
 
         Board:
         name=\(board.name)

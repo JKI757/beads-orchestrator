@@ -44,6 +44,8 @@
 		A10000000000000000000035 /* BeadsServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* BeadsServerClient.swift */; };
 		A10000000000000000000036 /* BeadsHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* BeadsHTTPServer.swift */; };
 		A10000000000000000000037 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* XCTest.framework */; };
+		A10000000000000000000038 /* AIPMWorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* AIPMWorkspaceViews.swift */; };
+		A10000000000000000000039 /* AIPMWorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* AIPMWorkspaceViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,6 +69,7 @@
 		A20000000000000000000022 /* AIPMEvaluationHarnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPMEvaluationHarnessTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000023 /* Beads-Orchestrator macOS Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Beads-Orchestrator macOS Tests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000024 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		A20000000000000000000025 /* AIPMWorkspaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPMWorkspaceViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,6 +142,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000005 /* RootView.swift */,
+				A20000000000000000000025 /* AIPMWorkspaceViews.swift */,
 				A20000000000000000000006 /* SidebarView.swift */,
 				A20000000000000000000007 /* BoardView.swift */,
 				A20000000000000000000008 /* BeadCardView.swift */,
@@ -278,6 +282,7 @@
 				A10000000000000000000003 /* Bead.swift in Sources */,
 				A10000000000000000000004 /* BoardStore.swift in Sources */,
 				A10000000000000000000005 /* RootView.swift in Sources */,
+				A10000000000000000000038 /* AIPMWorkspaceViews.swift in Sources */,
 				A10000000000000000000006 /* SidebarView.swift in Sources */,
 				A10000000000000000000007 /* BoardView.swift in Sources */,
 				A10000000000000000000008 /* BeadCardView.swift in Sources */,
@@ -298,6 +303,7 @@
 				A10000000000000000000012 /* Bead.swift in Sources */,
 				A10000000000000000000013 /* BoardStore.swift in Sources */,
 				A10000000000000000000014 /* RootView.swift in Sources */,
+				A10000000000000000000039 /* AIPMWorkspaceViews.swift in Sources */,
 				A10000000000000000000015 /* SidebarView.swift in Sources */,
 				A10000000000000000000016 /* BoardView.swift in Sources */,
 				A10000000000000000000017 /* BeadCardView.swift in Sources */,
