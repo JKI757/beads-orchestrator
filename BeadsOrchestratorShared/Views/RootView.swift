@@ -66,6 +66,11 @@ struct RootView: View {
             BeadDetailView(bead: store.selectedBead)
         }
         .searchable(text: $store.searchText, prompt: "Search beads")
+        #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: .openAIPMWorkspace)) { _ in
+            workspaceMode = .aiPM
+        }
+        #endif
         .toolbar {
             ToolbarItemGroup {
                 WorkspaceModePicker(selection: $workspaceMode)

@@ -65,6 +65,10 @@ struct AIPMWorkspaceView: View {
                         Toggle("Review backlog", isOn: $draft.reviewsBacklog)
                         Toggle("Generate reports", isOn: $draft.generatesReports)
                         Toggle("Notify on this Mac", isOn: $draft.sendsNotifications)
+                        Toggle("Notify high-risk decisions", isOn: $draft.notifiesHighRiskProposals)
+                            .disabled(!draft.sendsNotifications)
+                        Toggle("Notify run failures", isOn: $draft.notifiesRunFailures)
+                            .disabled(!draft.sendsNotifications)
                         Picker("Cadence", selection: $draft.cadence) {
                             ForEach(AIPMCadence.allCases) { cadence in
                                 Text(cadence.displayName).tag(cadence)

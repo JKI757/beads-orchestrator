@@ -1267,7 +1267,9 @@ private enum LLMEndpointDiscoveryError: LocalizedError {
 private final class AIPMLocalNotifier {
     static let shared = AIPMLocalNotifier()
 
-    private init() {}
+    private init() {
+        UNUserNotificationCenter.current().delegate = AIPMNotificationRouter.shared
+    }
 
     func deliver(identifier: String, title: String, body: String) {
         let center = UNUserNotificationCenter.current()
@@ -1293,7 +1295,34 @@ private final class AIPMLocalNotifier {
         content.title = title
         content.body = body
         content.sound = .default
+        content.userInfo = ["route": "ai-pm"]
         center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
+    }
+}
+
+extension Notification.Name {
+    static let openAIPMWorkspace = Notification.Name("openAIPMWorkspace")
+}
+
+private final class AIPMNotificationRouter: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = AIPMNotificationRouter()
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let route = response.notification.request.content.userInfo["route"] as? String
+        guard route == "ai-pm" else { return }
+        await MainActor.run {
+            NotificationCenter.default.post(name: .openAIPMWorkspace, object: nil)
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 }
 #endif
