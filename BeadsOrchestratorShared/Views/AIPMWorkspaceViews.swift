@@ -1000,12 +1000,22 @@ private extension BeadChangeApplicationStatus {
 
 private struct AIPMReportRow: View {
     let report: AIPMReportSnapshot
+    @State private var didCopy = false
 
     var body: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
                 Text(report.summary)
                     .foregroundStyle(.secondary)
+
+                if !report.deltas.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 8) {
+                        AIPMReportDeltaGroup(title: "Progress", items: report.deltas.progress, color: .green)
+                        AIPMReportDeltaGroup(title: "Risks", items: report.deltas.risks, color: .red)
+                        AIPMReportDeltaGroup(title: "Blockers", items: report.deltas.blockers, color: .orange)
+                        AIPMReportDeltaGroup(title: "Decisions", items: report.deltas.decisions, color: .blue)
+                    }
+                }
 
                 ForEach(report.sections) { section in
                     VStack(alignment: .leading, spacing: 4) {
@@ -1017,6 +1027,13 @@ private struct AIPMReportRow: View {
                         }
                     }
                 }
+
+                Button {
+                    copyReport()
+                } label: {
+                    Label(didCopy ? "Copied" : "Copy Markdown", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
             }
             .padding(.top, 6)
         } label: {
@@ -1027,6 +1044,55 @@ private struct AIPMReportRow: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func copyReport() {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+        #else
+        UIPasteboard.general.string = markdown
+        #endif
+        didCopy = true
+    }
+
+    private var markdown: String {
+        var lines = ["# \(report.title)", "", report.summary, ""]
+        if !report.deltas.isEmpty {
+            appendSection("Progress", items: report.deltas.progress, to: &lines)
+            appendSection("Risks", items: report.deltas.risks, to: &lines)
+            appendSection("Blockers", items: report.deltas.blockers, to: &lines)
+            appendSection("Decisions", items: report.deltas.decisions, to: &lines)
+        }
+        for section in report.sections {
+            appendSection(section.title, items: section.items, to: &lines)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func appendSection(_ title: String, items: [String], to lines: inout [String]) {
+        guard !items.isEmpty else { return }
+        lines.append("## \(title)")
+        lines.append(contentsOf: items.map { "- \($0)" })
+        lines.append("")
+    }
+}
+
+private struct AIPMReportDeltaGroup: View {
+    let title: String
+    let items: [String]
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("\(items.count)", systemImage: "circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 #endif
