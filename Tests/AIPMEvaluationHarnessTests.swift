@@ -92,6 +92,21 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         let moved = store.bead(beadsID: fixture.implementation.relationshipID)
         XCTAssertEqual(moved?.status, "Blocked")
         XCTAssertTrue(store.selectedBoard?.columns.first { $0.name == "Blocked" }?.beads.contains { $0.relationshipID == fixture.implementation.relationshipID } == true)
+        XCTAssertNotNil(setStatusResult.rollbackChange)
+
+        let rollbackEvent = AIPMAuditEvent(
+            kind: .proposalActionApplied,
+            summary: "Set status for proposal",
+            change: setStatusResult.change,
+            rollbackChange: setStatusResult.rollbackChange,
+            resultStatus: "applied",
+            resultMessage: setStatusResult.message
+        )
+        let rollbackResult = store.rollback(rollbackEvent)
+
+        XCTAssertEqual(rollbackResult?.status, .applied)
+        XCTAssertEqual(store.bead(beadsID: fixture.implementation.relationshipID)?.status, "In Progress")
+        XCTAssertTrue(store.selectedBoard?.columns.first { $0.name == "In Progress" }?.beads.contains { $0.relationshipID == fixture.implementation.relationshipID } == true)
 
         let blockedResult = store.apply(BeadPlanReviewChange(
             kind: .setBlocked,

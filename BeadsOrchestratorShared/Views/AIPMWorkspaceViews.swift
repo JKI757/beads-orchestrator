@@ -157,12 +157,14 @@ struct AIPMWorkspaceView: View {
                                     systemImage: "clock.arrow.circlepath",
                                     description: Text("Runs, failures, proposal decisions, and applied actions are recorded here.")
                                 )
-                            } else {
-                                ForEach(pmState.state.auditEvents.prefix(6)) { event in
-                                    AIPMAuditEventRow(event: event)
+                                } else {
+                                    ForEach(pmState.state.auditEvents.prefix(6)) { event in
+                                        AIPMAuditEventRow(event: event) {
+                                            rollback(event)
+                                        }
+                                    }
                                 }
                             }
-                        }
                     } label: {
                         Label("Audit History", systemImage: "clock.arrow.circlepath")
                     }
@@ -211,6 +213,15 @@ struct AIPMWorkspaceView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func rollback(_ event: AIPMAuditEvent) {
+        guard let result = store.rollback(event) else { return }
+        server.aiPMState.recordRollback(
+            event: event,
+            resultStatus: result.status.auditValue,
+            resultMessage: result.message
+        )
     }
 }
 
@@ -526,7 +537,9 @@ private struct AIPMDashboardContent: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(pmState.state.auditEvents.prefix(8)) { event in
-                            AIPMAuditEventRow(event: event)
+                            AIPMAuditEventRow(event: event) {
+                                rollback(event)
+                            }
                         }
                     }
                 }
@@ -626,6 +639,15 @@ private struct AIPMDashboardContent: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func rollback(_ event: AIPMAuditEvent) {
+        guard let result = store.rollback(event) else { return }
+        server.aiPMState.recordRollback(
+            event: event,
+            resultStatus: result.status.auditValue,
+            resultMessage: result.message
+        )
     }
 }
 
@@ -831,6 +853,7 @@ private struct AIPMProposalApplySheet: View {
             server.aiPMState.recordActionApplication(
                 proposal: proposal,
                 change: result.change,
+                rollbackChange: result.rollbackChange,
                 resultStatus: result.status.auditValue,
                 resultMessage: result.message
             )
@@ -1036,6 +1059,7 @@ struct AIPMProjectIntelligenceView: View {
 
 struct AIPMAuditEventRow: View {
     let event: AIPMAuditEvent
+    var rollback: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1061,15 +1085,28 @@ struct AIPMAuditEventRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            if canRollback {
+                Button {
+                    rollback?()
+                } label: {
+                    Label("Roll Back", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
         }
         .padding(.vertical, 4)
+    }
+
+    private var canRollback: Bool {
+        event.kind == .proposalActionApplied && event.resultStatus == "applied" && event.rollbackChange != nil && rollback != nil
     }
 
     private var kindColor: Color {
         switch event.kind {
         case .runFailed:
             .red
-        case .proposalActionApplied:
+        case .proposalActionApplied, .proposalActionRolledBack:
             .blue
         case .proposalStatusChanged:
             .orange

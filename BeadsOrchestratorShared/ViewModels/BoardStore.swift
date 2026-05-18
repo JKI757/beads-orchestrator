@@ -328,10 +328,14 @@ final class BoardStore: ObservableObject {
                 return BeadChangeApplicationResult(change: change, status: .failed, message: "Missing field value.")
             }
 
+            let rollbackChange = rollbackUpdateFieldChange(original: change, target: target)
             var draft = BeadDraft(bead: target)
             apply(field: field, value: value, to: &draft)
             updateBead(target.id, with: draft)
-            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated \(target.title).")
+            if field == .status, let columnID = columnID(forStatus: value) {
+                moveBead(target.id, to: columnID)
+            }
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated \(target.title).", rollbackChange: rollbackChange)
 
         case .createBead:
             var draft = BeadDraft()
@@ -385,11 +389,12 @@ final class BoardStore: ObservableObject {
             guard !draft.dependencyBeadsIDs.contains(dependencyID) else {
                 return BeadChangeApplicationResult(change: change, status: .skipped, message: "\(target.title) already depends on \(dependencyID).")
             }
+            let rollbackChange = rollbackUpdateFieldChange(field: .dependencyBeadsIDs, target: target, rationale: "Restore dependency list before AI PM change.")
             draft.dependencyBeadsIDs.append(dependencyID)
             draft.dependencyBeadsIDs.sort()
             draft.dependencyCount = draft.dependencyBeadsIDs.count
             updateBead(target.id, with: draft)
-            return BeadChangeApplicationResult(change: change, status: .applied, message: "Added dependency to \(target.title).")
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Added dependency to \(target.title).", rollbackChange: rollbackChange)
 
         case .setParent:
             guard let parentID = change.value?.nilIfBlank else {
@@ -403,9 +408,10 @@ final class BoardStore: ObservableObject {
             }
 
             var draft = BeadDraft(bead: target)
+            let rollbackChange = rollbackUpdateFieldChange(field: .parentBeadsID, target: target, rationale: "Restore parent before AI PM change.")
             draft.parentBeadsID = parentID
             updateBead(target.id, with: draft)
-            return BeadChangeApplicationResult(change: change, status: .applied, message: "Set parent for \(target.title).")
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Set parent for \(target.title).", rollbackChange: rollbackChange)
 
         case .setStatus:
             guard let status = change.value?.nilIfBlank else {
@@ -416,12 +422,13 @@ final class BoardStore: ObservableObject {
             }
 
             var draft = BeadDraft(bead: target)
+            let rollbackChange = rollbackUpdateFieldChange(field: .status, target: target, rationale: "Restore status before AI PM change.")
             draft.status = status
             updateBead(target.id, with: draft)
             if let columnID = columnID(forStatus: status) {
                 moveBead(target.id, to: columnID)
             }
-            return BeadChangeApplicationResult(change: change, status: .applied, message: "Set status for \(target.title).")
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Set status for \(target.title).", rollbackChange: rollbackChange)
 
         case .setBlocked:
             guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
@@ -429,9 +436,22 @@ final class BoardStore: ObservableObject {
             }
 
             var draft = BeadDraft(bead: target)
+            let rollbackChange = BeadPlanReviewChange(
+                kind: .setBlocked,
+                targetBeadsID: target.relationshipID,
+                field: nil,
+                value: "\(target.isBlocked)",
+                title: nil,
+                summary: nil,
+                notes: nil,
+                labels: nil,
+                priority: nil,
+                issueType: nil,
+                rationale: "Restore blocked state before AI PM change."
+            )
             draft.isBlocked = boolValue(from: change.value, defaultValue: true)
             updateBead(target.id, with: draft)
-            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated blocked state for \(target.title).")
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated blocked state for \(target.title).", rollbackChange: rollbackChange)
 
         case .setStale:
             guard let target = targetBead(for: change, fallbackBead: fallbackBead) else {
@@ -439,10 +459,28 @@ final class BoardStore: ObservableObject {
             }
 
             var draft = BeadDraft(bead: target)
+            let rollbackChange = BeadPlanReviewChange(
+                kind: .setStale,
+                targetBeadsID: target.relationshipID,
+                field: nil,
+                value: "\(target.isStale)",
+                title: nil,
+                summary: nil,
+                notes: nil,
+                labels: nil,
+                priority: nil,
+                issueType: nil,
+                rationale: "Restore stale state before AI PM change."
+            )
             draft.isStale = boolValue(from: change.value, defaultValue: true)
             updateBead(target.id, with: draft)
-            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated stale state for \(target.title).")
+            return BeadChangeApplicationResult(change: change, status: .applied, message: "Updated stale state for \(target.title).", rollbackChange: rollbackChange)
         }
+    }
+
+    func rollback(_ event: AIPMAuditEvent) -> BeadChangeApplicationResult? {
+        guard let rollbackChange = event.rollbackChange else { return nil }
+        return apply(rollbackChange)
     }
 
     func archiveBead(_ beadID: Bead.ID) {
@@ -769,6 +807,54 @@ final class BoardStore: ObservableObject {
         }
     }
 
+    private func rollbackUpdateFieldChange(original change: BeadPlanReviewChange, target: Bead) -> BeadPlanReviewChange? {
+        guard let field = change.field else { return nil }
+        return rollbackUpdateFieldChange(field: field, target: target, rationale: "Restore \(field.displayName) before AI PM change.")
+    }
+
+    private func rollbackUpdateFieldChange(field: BeadSuggestionField, target: Bead, rationale: String) -> BeadPlanReviewChange {
+        BeadPlanReviewChange(
+            kind: .updateField,
+            targetBeadsID: target.relationshipID,
+            field: field,
+            value: rollbackValue(field: field, target: target),
+            title: nil,
+            summary: nil,
+            notes: nil,
+            labels: nil,
+            priority: nil,
+            issueType: nil,
+            rationale: rationale
+        )
+    }
+
+    private func rollbackValue(field: BeadSuggestionField, target: Bead) -> String {
+        switch field {
+        case .title:
+            target.title
+        case .summary:
+            target.summary
+        case .notes:
+            target.notes
+        case .labels:
+            target.labels.joined(separator: ", ")
+        case .priority:
+            target.priority.rawValue
+        case .issueType:
+            target.issueType ?? ""
+        case .status:
+            target.status ?? ""
+        case .isBlocked:
+            "\(target.isBlocked)"
+        case .isStale:
+            "\(target.isStale)"
+        case .parentBeadsID:
+            target.parentBeadsID ?? ""
+        case .dependencyBeadsIDs:
+            target.dependencyBeadsIDs.joined(separator: ", ")
+        }
+    }
+
     private func columnID(forStatus status: String) -> BoardColumn.ID? {
         let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
@@ -976,6 +1062,19 @@ struct BeadChangeApplicationResult: Identifiable, Equatable {
     var change: BeadPlanReviewChange
     var status: BeadChangeApplicationStatus
     var message: String
+    var rollbackChange: BeadPlanReviewChange?
+
+    init(
+        change: BeadPlanReviewChange,
+        status: BeadChangeApplicationStatus,
+        message: String,
+        rollbackChange: BeadPlanReviewChange? = nil
+    ) {
+        self.change = change
+        self.status = status
+        self.message = message
+        self.rollbackChange = rollbackChange
+    }
 }
 
 enum BeadChangeApplicationStatus: Equatable {

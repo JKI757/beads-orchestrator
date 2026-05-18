@@ -622,6 +622,7 @@ struct AIPMAuditEvent: Codable, Equatable, Identifiable {
     var proposalID: AIPMDecisionProposal.ID?
     var proposalTitle: String?
     var change: BeadPlanReviewChange?
+    var rollbackChange: BeadPlanReviewChange?
     var resultStatus: String?
     var resultMessage: String?
     var createdAt: Date
@@ -634,6 +635,7 @@ struct AIPMAuditEvent: Codable, Equatable, Identifiable {
         proposalID: AIPMDecisionProposal.ID? = nil,
         proposalTitle: String? = nil,
         change: BeadPlanReviewChange? = nil,
+        rollbackChange: BeadPlanReviewChange? = nil,
         resultStatus: String? = nil,
         resultMessage: String? = nil,
         createdAt: Date = .now
@@ -645,6 +647,7 @@ struct AIPMAuditEvent: Codable, Equatable, Identifiable {
         self.proposalID = proposalID
         self.proposalTitle = proposalTitle
         self.change = change
+        self.rollbackChange = rollbackChange
         self.resultStatus = resultStatus
         self.resultMessage = resultMessage
         self.createdAt = createdAt
@@ -656,6 +659,7 @@ enum AIPMAuditEventKind: String, Codable, CaseIterable, Identifiable {
     case runFailed
     case proposalStatusChanged
     case proposalActionApplied
+    case proposalActionRolledBack
 
     var id: String {
         rawValue
@@ -671,6 +675,8 @@ enum AIPMAuditEventKind: String, Codable, CaseIterable, Identifiable {
             "Decision Updated"
         case .proposalActionApplied:
             "Action Applied"
+        case .proposalActionRolledBack:
+            "Action Rolled Back"
         }
     }
 }
@@ -1398,6 +1404,7 @@ final class AIPMStateStore: ObservableObject {
     func recordActionApplication(
         proposal: AIPMDecisionProposal,
         change: BeadPlanReviewChange,
+        rollbackChange: BeadPlanReviewChange?,
         resultStatus: String,
         resultMessage: String
     ) {
@@ -1410,6 +1417,31 @@ final class AIPMStateStore: ObservableObject {
                 proposalID: proposal.id,
                 proposalTitle: proposal.title,
                 change: change,
+                rollbackChange: rollbackChange,
+                resultStatus: resultStatus,
+                resultMessage: resultMessage
+            ),
+            to: nextState.auditEvents
+        )
+        nextState.updatedAt = .now
+        state = nextState
+        persist()
+    }
+
+    func recordRollback(
+        event: AIPMAuditEvent,
+        resultStatus: String,
+        resultMessage: String
+    ) {
+        var nextState = state
+        nextState.auditEvents = prependingAuditEvent(
+            AIPMAuditEvent(
+                kind: .proposalActionRolledBack,
+                actor: "User",
+                summary: "Rolled back \(event.summary)",
+                proposalID: event.proposalID,
+                proposalTitle: event.proposalTitle,
+                change: event.rollbackChange,
                 resultStatus: resultStatus,
                 resultMessage: resultMessage
             ),
