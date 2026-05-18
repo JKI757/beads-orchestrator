@@ -52,6 +52,7 @@ struct AIPMWorkspaceView: View {
                 AIPMStatusPanel(
                     state: pmState.state,
                     llmStatus: server.llmConfiguration.status,
+                    llmConfiguration: server.llmConfiguration.configuration,
                     errorMessage: errorMessage,
                     lastRunText: lastRunText,
                     nextRunText: nextRunText,
@@ -334,6 +335,7 @@ private struct AIPMWorkspaceAvailabilityBanner: View {
 private struct AIPMStatusPanel: View {
     let state: AIPMState
     let llmStatus: BeadsLLMStatus
+    let llmConfiguration: LLMServerConfiguration
     let errorMessage: String?
     let lastRunText: String
     let nextRunText: String
@@ -370,10 +372,37 @@ private struct AIPMStatusPanel: View {
                         }
                     }
                 }
+
+                Divider()
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), alignment: .leading)], alignment: .leading, spacing: 8) {
+                    LabeledContent("Provider", value: llmStatus.provider)
+                    LabeledContent("Endpoint", value: endpointText)
+                    LabeledContent("Latency", value: latencyText)
+                    LabeledContent("Timeout", value: "\(Int(llmConfiguration.sanitizedTimeoutSeconds))s")
+                    LabeledContent("Response cap", value: ByteCountFormatter.string(fromByteCount: Int64(llmConfiguration.sanitizedMaximumResponseBytes), countStyle: .file))
+                    LabeledContent("Retries", value: "\(llmConfiguration.sanitizedRetryLimit)")
+                }
+                .font(.caption)
+
+                if let failure = llmStatus.lastFailureMessage, !failure.isEmpty {
+                    Label(failure, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
         } label: {
             Label("Status", systemImage: "sparkles")
         }
+    }
+
+    private var endpointText: String {
+        llmConfiguration.endpointURL?.absoluteString ?? "Invalid endpoint"
+    }
+
+    private var latencyText: String {
+        guard let milliseconds = llmStatus.lastLatencyMilliseconds else { return "Not measured" }
+        return "\(milliseconds) ms"
     }
 }
 
