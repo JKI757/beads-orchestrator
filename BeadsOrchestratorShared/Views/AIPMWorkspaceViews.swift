@@ -103,11 +103,7 @@ struct AIPMWorkspaceView: View {
                                     AIPMProposalRow(
                                         proposal: proposal,
                                         applyProposal: {
-                                            if proposal.changes.isEmpty {
-                                                pmState.updateProposal(proposal.id, status: .accepted)
-                                            } else {
-                                                proposalToApply = proposal
-                                            }
+                                            proposalToApply = proposal
                                         },
                                         updateStatus: { status in
                                             pmState.updateProposal(proposal.id, status: status)
@@ -503,11 +499,7 @@ private struct AIPMDashboardContent: View {
                             AIPMProposalRow(
                                 proposal: proposal,
                                 applyProposal: {
-                                    if proposal.changes.isEmpty {
-                                        pmState.updateProposal(proposal.id, status: .accepted)
-                                    } else {
-                                        proposalToApply = proposal
-                                    }
+                                    proposalToApply = proposal
                                 },
                                 updateStatus: { status in
                                     pmState.updateProposal(proposal.id, status: status)
@@ -661,15 +653,16 @@ private struct AIPMProposalRow: View {
             Text(proposal.rationale)
                 .font(.callout)
 
-            if !proposal.changes.isEmpty {
-                Text("\(proposal.changes.count) proposed change\(proposal.changes.count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(proposal.changes.isEmpty ? "Decision only" : "\(proposal.changes.count) proposed change\(proposal.changes.count == 1 ? "" : "s")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack {
-                Button(proposal.changes.isEmpty ? "Mark Accepted" : "Review & Apply") {
+                Button("Review") {
                     applyProposal()
+                }
+                Button("Defer") {
+                    updateStatus(.deferred)
                 }
                 Button("Dismiss") {
                     updateStatus(.dismissed)
@@ -711,24 +704,35 @@ private struct AIPMProposalApplySheet: View {
                 Section("Proposal") {
                     Text(proposal.title)
                         .font(.headline)
+                    LabeledContent("Category", value: proposal.category.displayName)
+                    LabeledContent("Risk", value: proposal.risk.rawValue.capitalized)
+                    LabeledContent("Actions", value: "\(proposal.changes.count)")
                     Text(proposal.summary)
                         .foregroundStyle(.secondary)
                     Text(proposal.rationale)
                 }
 
                 Section("Changes") {
-                    ForEach(Array(proposal.changes.enumerated()), id: \.offset) { index, change in
-                        Toggle(isOn: Binding(
-                            get: { selectedChangeIndexes.contains(index) },
-                            set: { isSelected in
-                                if isSelected {
-                                    selectedChangeIndexes.insert(index)
-                                } else {
-                                    selectedChangeIndexes.remove(index)
+                    if proposal.changes.isEmpty {
+                        ContentUnavailableView(
+                            "No Proposed Changes",
+                            systemImage: "text.badge.checkmark",
+                            description: Text("Accepting this proposal records the decision without mutating the board.")
+                        )
+                    } else {
+                        ForEach(Array(proposal.changes.enumerated()), id: \.offset) { index, change in
+                            Toggle(isOn: Binding(
+                                get: { selectedChangeIndexes.contains(index) },
+                                set: { isSelected in
+                                    if isSelected {
+                                        selectedChangeIndexes.insert(index)
+                                    } else {
+                                        selectedChangeIndexes.remove(index)
+                                    }
                                 }
+                            )) {
+                                AIPMChangeSummary(change: change)
                             }
-                        )) {
-                            AIPMChangeSummary(change: change)
                         }
                     }
                 }
@@ -767,17 +771,27 @@ private struct AIPMProposalApplySheet: View {
                     dismiss()
                 }
 
+                Button("Defer") {
+                    updateStatus(.deferred)
+                    dismiss()
+                }
+
+                Button("Dismiss") {
+                    updateStatus(.dismissed)
+                    dismiss()
+                }
+
                 Spacer()
 
-                Button("Apply Selected") {
+                Button(proposal.changes.isEmpty ? "Accept" : "Apply Selected") {
                     applySelectedChanges()
                 }
-                .disabled(selectedChangeIndexes.isEmpty || (requiresExplicitApproval && !hasExplicitApproval))
+                .disabled((!proposal.changes.isEmpty && selectedChangeIndexes.isEmpty) || (requiresExplicitApproval && !hasExplicitApproval))
                 .keyboardShortcut(.defaultAction)
             }
             .padding()
         }
-        .navigationTitle("Apply Proposal")
+        .navigationTitle("Review Proposal")
         .frame(width: 560)
         .frame(minHeight: 520)
         .onAppear {
@@ -786,7 +800,7 @@ private struct AIPMProposalApplySheet: View {
     }
 
     private var requiresExplicitApproval: Bool {
-        (server.aiPMState.state.settings.requiresHighRiskApproval && proposal.risk == .high) || selectedChangeIndexes.count > 1
+        !proposal.changes.isEmpty && ((server.aiPMState.state.settings.requiresHighRiskApproval && proposal.risk == .high) || selectedChangeIndexes.count > 1)
     }
 
     private var safetySummary: String {
@@ -797,6 +811,12 @@ private struct AIPMProposalApplySheet: View {
     }
 
     private func applySelectedChanges() {
+        if proposal.changes.isEmpty {
+            updateStatus(.accepted)
+            dismiss()
+            return
+        }
+
         safetyMessage = server.aipmSafetyRejection(
             proposal: proposal,
             selectedChangeCount: selectedChangeIndexes.count,

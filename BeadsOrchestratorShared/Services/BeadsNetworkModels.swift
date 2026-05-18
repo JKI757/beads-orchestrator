@@ -507,6 +507,7 @@ enum AIPMProposalStatus: String, Codable, CaseIterable, Identifiable {
     case pending
     case accepted
     case dismissed
+    case deferred
 
     var id: String {
         rawValue
