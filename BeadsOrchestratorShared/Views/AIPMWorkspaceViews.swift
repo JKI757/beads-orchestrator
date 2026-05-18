@@ -5,6 +5,7 @@ struct AIPMWorkspaceView: View {
     @EnvironmentObject private var server: BeadsHTTPServer
     @EnvironmentObject private var store: BoardStore
     @ObservedObject var pmState: AIPMStateStore
+    var openLLMSettings: () -> Void = {}
 
     @State private var draft = AIPMAutomationSettings()
     @State private var isRunning = false
@@ -14,6 +15,33 @@ struct AIPMWorkspaceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                AIPMWorkspaceHeader(
+                    boardName: store.selectedBoard?.name ?? "No board selected",
+                    hasBoard: store.selectedBoard != nil,
+                    status: pmState.state,
+                    llmStatus: server.llmConfiguration.status,
+                    isRunning: isRunning,
+                    runPM: { Task { await runPM() } },
+                    saveSettings: save,
+                    openLLMSettings: openLLMSettings
+                )
+
+                if store.selectedBoard == nil {
+                    AIPMWorkspaceAvailabilityBanner(
+                        title: "No Board Selected",
+                        systemImage: "rectangle.3.group",
+                        message: "Select a board before running AI PM."
+                    )
+                } else if !server.llmConfiguration.status.isAvailable {
+                    AIPMWorkspaceAvailabilityBanner(
+                        title: "Provider Needs Setup",
+                        systemImage: "exclamationmark.triangle",
+                        message: server.llmConfiguration.status.message,
+                        actionTitle: "LLM Settings",
+                        action: openLLMSettings
+                    )
+                }
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                     AIPMMetricCard(title: "Pending", value: "\(pmState.state.pendingProposals.count)", systemImage: "exclamationmark.bubble")
                     AIPMMetricCard(title: "High Risk", value: "\(pmState.state.highRiskPendingProposals.count)", systemImage: "exclamationmark.triangle")
@@ -21,35 +49,14 @@ struct AIPMWorkspaceView: View {
                     AIPMMetricCard(title: "Signals", value: "\(pmState.state.latestIntelligence?.signals.count ?? 0)", systemImage: "waveform.path.ecg")
                 }
 
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(pmState.state.lastRunSummary ?? "No AI PM run has completed yet.")
-                                    .font(.headline)
-                                Text("Last run: \(lastRunText)  |  Next run: \(nextRunText)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if isRunning {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-
-                        if let error = errorMessage ?? pmState.state.lastRunError, !error.isEmpty {
-                            Text(error)
-                                .foregroundStyle(.red)
-                        }
-
-                        Text(server.llmConfiguration.status.message)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                } label: {
-                    Label("Status", systemImage: "sparkles")
-                }
+                AIPMStatusPanel(
+                    state: pmState.state,
+                    llmStatus: server.llmConfiguration.status,
+                    errorMessage: errorMessage,
+                    lastRunText: lastRunText,
+                    nextRunText: nextRunText,
+                    openLLMSettings: openLLMSettings
+                )
 
                 GroupBox {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
@@ -79,8 +86,11 @@ struct AIPMWorkspaceView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
                             if pmState.state.pendingProposals.isEmpty {
-                                Text("No pending decisions.")
-                                    .foregroundStyle(.secondary)
+                                ContentUnavailableView(
+                                    "No Pending Decisions",
+                                    systemImage: "checkmark.seal",
+                                    description: Text("Run the AI PM to surface risks, sequencing problems, and decisions that need review.")
+                                )
                             } else {
                                 ForEach(pmState.state.pendingProposals.prefix(6)) { proposal in
                                     AIPMProposalRow(
@@ -108,8 +118,11 @@ struct AIPMWorkspaceView: View {
                         if let intelligence = pmState.state.latestIntelligence {
                             AIPMProjectIntelligenceView(intelligence: intelligence)
                         } else {
-                            Text("No project intelligence generated yet.")
-                                .foregroundStyle(.secondary)
+                            ContentUnavailableView(
+                                "No Project Intelligence",
+                                systemImage: "waveform.path.ecg",
+                                description: Text("Project signals are generated during each AI PM run.")
+                            )
                         }
                     } label: {
                         Label("Project Intelligence", systemImage: "waveform.path.ecg")
@@ -118,8 +131,11 @@ struct AIPMWorkspaceView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
                             if pmState.state.reports.isEmpty {
-                                Text("No reports generated yet.")
-                                    .foregroundStyle(.secondary)
+                                ContentUnavailableView(
+                                    "No Reports",
+                                    systemImage: "doc.text.magnifyingglass",
+                                    description: Text("Reports appear after AI PM runs with reporting enabled.")
+                                )
                             } else {
                                 ForEach(pmState.state.reports.prefix(4)) { report in
                                     AIPMReportRow(report: report)
@@ -133,8 +149,11 @@ struct AIPMWorkspaceView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
                             if pmState.state.auditEvents.isEmpty {
-                                Text("No audit events yet.")
-                                    .foregroundStyle(.secondary)
+                                ContentUnavailableView(
+                                    "No Audit Events",
+                                    systemImage: "clock.arrow.circlepath",
+                                    description: Text("Runs, failures, proposal decisions, and applied actions are recorded here.")
+                                )
                             } else {
                                 ForEach(pmState.state.auditEvents.prefix(6)) { event in
                                     AIPMAuditEventRow(event: event)
@@ -149,22 +168,6 @@ struct AIPMWorkspaceView: View {
             .padding(20)
         }
         .navigationTitle("AI PM")
-        .toolbar {
-            ToolbarItemGroup {
-                Button {
-                    Task { await runPM() }
-                } label: {
-                    Label("Run AI PM", systemImage: "play.circle")
-                }
-                .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
-
-                Button {
-                    save()
-                } label: {
-                    Label("Save", systemImage: "checkmark.circle")
-                }
-            }
-        }
         .onAppear {
             draft = pmState.state.settings
         }
@@ -199,10 +202,161 @@ struct AIPMWorkspaceView: View {
         defer { isRunning = false }
 
         do {
-            _ = try await server.runAIPM()
+            _ = try await server.runAIPM(request: AIPMRunRequest(boardID: store.selectedBoardID))
             draft = pmState.state.settings
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct AIPMWorkspaceHeader: View {
+    let boardName: String
+    let hasBoard: Bool
+    let status: AIPMState
+    let llmStatus: BeadsLLMStatus
+    let isRunning: Bool
+    var runPM: () -> Void
+    var saveSettings: () -> Void
+    var openLLMSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("AI PM")
+                        .font(.largeTitle.weight(.semibold))
+                    Text(boardName)
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text(status.lastRunSummary ?? "Run the AI PM to generate decisions, reports, and project intelligence.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                HStack {
+                    Button {
+                        runPM()
+                    } label: {
+                        Label("Run", systemImage: "play.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canRun)
+
+                    Button {
+                        saveSettings()
+                    } label: {
+                        Label("Save", systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button {
+                        openLLMSettings()
+                    } label: {
+                        Label("LLM", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Label(status.settings.isEnabled ? "Enabled" : "Disabled", systemImage: status.settings.isEnabled ? "checkmark.circle" : "pause.circle")
+                Label(llmStatus.isAvailable ? "Provider Ready" : "Provider Needs Setup", systemImage: llmStatus.isAvailable ? "bolt.circle" : "exclamationmark.triangle")
+                if isRunning {
+                    Label("Running", systemImage: "hourglass")
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var canRun: Bool {
+        !isRunning && status.settings.isEnabled && llmStatus.isAvailable && hasBoard
+    }
+}
+
+private struct AIPMWorkspaceAvailabilityBanner: View {
+    let title: String
+    let systemImage: String
+    let message: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+        }
+    }
+}
+
+private struct AIPMStatusPanel: View {
+    let state: AIPMState
+    let llmStatus: BeadsLLMStatus
+    let errorMessage: String?
+    let lastRunText: String
+    let nextRunText: String
+    var openLLMSettings: () -> Void
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    LabeledContent("Last run", value: lastRunText)
+                    LabeledContent("Next run", value: nextRunText)
+                }
+                .font(.callout)
+
+                if let error = errorMessage ?? state.lastRunError, !error.isEmpty {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                }
+
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(llmStatus.message)
+                        if let model = llmStatus.model, !model.isEmpty {
+                            Text("\(llmStatus.provider) / \(model)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if !llmStatus.isAvailable {
+                        Button("Open LLM Settings") {
+                            openLLMSettings()
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Status", systemImage: "sparkles")
         }
     }
 }

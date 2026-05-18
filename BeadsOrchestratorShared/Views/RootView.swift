@@ -51,7 +51,10 @@ struct RootView: View {
                     HierarchyView(board: board, presentation: .mac)
                 case .aiPM:
                     #if os(macOS)
-                    AIPMWorkspaceView(pmState: server.aiPMState)
+                    AIPMWorkspaceView(
+                        pmState: server.aiPMState,
+                        openLLMSettings: { showingLLMSettings = true }
+                    )
                     #else
                     RemoteAIPMWorkspaceView()
                     #endif
