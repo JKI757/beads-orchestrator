@@ -1216,12 +1216,38 @@ final class BeadsHTTPServer: ObservableObject {
         let blocked = activeBeads.filter(\.isBlocked)
         let stale = activeBeads.filter(\.isStale)
         let urgent = activeBeads.filter { $0.priority == .urgent }
+        let ready = activeBeads.filter { normalizedPMStatus($0.status).contains("ready") }
+        let inProgress = activeBeads.filter { normalizedPMStatus($0.status).contains("progress") }
+        let review = activeBeads.filter { normalizedPMStatus($0.status).contains("review") }
+        let done = activeBeads.filter {
+            let status = normalizedPMStatus($0.status)
+            return status.contains("done") || status.contains("closed") || status.contains("complete")
+        }
         let orphanedChildren = activeBeads.filter { bead in
             bead.parentBeadsID.map { beadsByRelationshipID[$0] == nil } ?? false
         }
         let dependencyIssueBeads = activeBeads.filter { bead in
             bead.dependencyBeadsIDs.contains { beadsByRelationshipID[$0] == nil || $0 == bead.relationshipID }
         }
+        let unparentedTasks = activeBeads.filter { bead in
+            normalizedIssueType(bead.issueType) != "epic" && bead.parentBeadsID == nil
+        }
+        let parentReferenceIssues = activeBeads.filter { bead in
+            !bead.childBeadsIDs.isEmpty && bead.childBeadsIDs.contains { childID in
+                guard let child = beadsByRelationshipID[childID] else { return true }
+                return child.parentBeadsID != bead.relationshipID
+            }
+        }
+        let blockedOutsideBlockedColumn = blocked.filter {
+            !normalizedPMStatus($0.status).contains("blocked")
+        }
+        let missingSummary = activeBeads.filter {
+            $0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let highFanInOrFanOut = activeBeads.filter {
+            max($0.dependencyBeadsIDs.count, $0.dependentBeadsIDs.count) >= 3
+        }
+        let dependencyCycleIDs = dependencyCycleBeadIDs(in: activeBeads)
 
         var signals: [AIPMProjectSignal] = []
         if activeBeads.isEmpty {
@@ -1259,6 +1285,42 @@ final class BeadsHTTPServer: ObservableObject {
                 beadIDs: urgent.map(\.relationshipID)
             ))
         }
+        if ready.isEmpty && !inProgress.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .warning,
+                category: .workload,
+                title: "No ready work queued",
+                detail: "Active work is in progress, but there is no ready queue for the next pull.",
+                beadIDs: inProgress.prefix(6).map(\.relationshipID)
+            ))
+        }
+        if inProgress.count >= 5 {
+            signals.append(AIPMProjectSignal(
+                severity: .warning,
+                category: .workload,
+                title: "\(inProgress.count) beads in progress",
+                detail: "A large in-progress set can hide blocked work and delay finishing.",
+                beadIDs: inProgress.map(\.relationshipID)
+            ))
+        }
+        if review.count >= 3 {
+            signals.append(AIPMProjectSignal(
+                severity: .warning,
+                category: .workload,
+                title: "\(review.count) beads waiting in review",
+                detail: "Review queue growth usually needs reviewer assignment or scope trimming.",
+                beadIDs: review.map(\.relationshipID)
+            ))
+        }
+        if done.count >= max(5, activeBeads.count / 2), !done.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .info,
+                category: .health,
+                title: "\(done.count) completed bead\(done.count == 1 ? "" : "s") still active",
+                detail: "Completed work can be archived or moved out of planning views to keep PM signals focused.",
+                beadIDs: done.map(\.relationshipID)
+            ))
+        }
         if !orphanedChildren.isEmpty {
             signals.append(AIPMProjectSignal(
                 severity: .warning,
@@ -1268,6 +1330,24 @@ final class BeadsHTTPServer: ObservableObject {
                 beadIDs: orphanedChildren.map(\.relationshipID)
             ))
         }
+        if !unparentedTasks.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: unparentedTasks.count >= 5 ? .warning : .info,
+                category: .hierarchy,
+                title: "\(unparentedTasks.count) bead\(unparentedTasks.count == 1 ? "" : "s") without parent context",
+                detail: "Non-epic work without a parent may need grouping under an initiative, milestone, or epic.",
+                beadIDs: unparentedTasks.map(\.relationshipID)
+            ))
+        }
+        if !parentReferenceIssues.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .warning,
+                category: .hierarchy,
+                title: "\(parentReferenceIssues.count) parent bead\(parentReferenceIssues.count == 1 ? "" : "s") with child reference drift",
+                detail: "Parent child lists should agree with each child's parent reference so hierarchy planning stays consistent.",
+                beadIDs: parentReferenceIssues.map(\.relationshipID)
+            ))
+        }
         if !dependencyIssueBeads.isEmpty {
             signals.append(AIPMProjectSignal(
                 severity: .warning,
@@ -1275,6 +1355,42 @@ final class BeadsHTTPServer: ObservableObject {
                 title: "\(dependencyIssueBeads.count) bead\(dependencyIssueBeads.count == 1 ? "" : "s") with dependency issues",
                 detail: "Dependencies should point to active beads and should not point back to the same bead.",
                 beadIDs: dependencyIssueBeads.map(\.relationshipID)
+            ))
+        }
+        if !dependencyCycleIDs.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .critical,
+                category: .dependency,
+                title: "\(dependencyCycleIDs.count) bead\(dependencyCycleIDs.count == 1 ? "" : "s") in dependency cycles",
+                detail: "Cyclic dependencies block sequencing because no item in the loop can clearly start first.",
+                beadIDs: dependencyCycleIDs
+            ))
+        }
+        if !highFanInOrFanOut.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .info,
+                category: .dependency,
+                title: "\(highFanInOrFanOut.count) high-coupling bead\(highFanInOrFanOut.count == 1 ? "" : "s")",
+                detail: "Beads with many dependencies or dependents are coordination points and may need explicit owner attention.",
+                beadIDs: highFanInOrFanOut.map(\.relationshipID)
+            ))
+        }
+        if !blockedOutsideBlockedColumn.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .warning,
+                category: .quality,
+                title: "\(blockedOutsideBlockedColumn.count) blocked bead\(blockedOutsideBlockedColumn.count == 1 ? "" : "s") outside blocked status",
+                detail: "Blocked flags and workflow status should agree so board scans and reports tell the same story.",
+                beadIDs: blockedOutsideBlockedColumn.map(\.relationshipID)
+            ))
+        }
+        if missingSummary.count >= max(3, activeBeads.count / 3), !missingSummary.isEmpty {
+            signals.append(AIPMProjectSignal(
+                severity: .info,
+                category: .quality,
+                title: "\(missingSummary.count) bead\(missingSummary.count == 1 ? "" : "s") missing summary",
+                detail: "Sparse bead descriptions make AI PM proposals and human triage less reliable.",
+                beadIDs: missingSummary.map(\.relationshipID)
             ))
         }
         if signals.isEmpty {
@@ -1298,6 +1414,41 @@ final class BeadsHTTPServer: ObservableObject {
             signals: signals,
             generatedAt: .now
         )
+    }
+
+    private func normalizedPMStatus(_ status: String?) -> String {
+        status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    }
+
+    private func normalizedIssueType(_ issueType: String?) -> String {
+        issueType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    }
+
+    private func dependencyCycleBeadIDs(in beads: [Bead]) -> [String] {
+        let beadsByID = Dictionary(beads.map { ($0.relationshipID, $0) }, uniquingKeysWith: { existing, _ in existing })
+        var visiting = Set<String>()
+        var visited = Set<String>()
+        var cyclic = Set<String>()
+
+        func visit(_ id: String, path: [String]) {
+            guard let bead = beadsByID[id] else { return }
+            if let cycleStart = path.firstIndex(of: id) {
+                cyclic.formUnion(path[cycleStart...])
+                return
+            }
+            guard !visited.contains(id), !visiting.contains(id) else { return }
+            visiting.insert(id)
+            for dependencyID in bead.dependencyBeadsIDs where beadsByID[dependencyID] != nil {
+                visit(dependencyID, path: path + [id])
+            }
+            visiting.remove(id)
+            visited.insert(id)
+        }
+
+        for bead in beads {
+            visit(bead.relationshipID, path: [])
+        }
+        return beads.map(\.relationshipID).filter { cyclic.contains($0) }
     }
 
     private func projectIntelligencePromptContext(_ intelligence: AIPMProjectIntelligenceSummary) -> String {

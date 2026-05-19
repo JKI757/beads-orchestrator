@@ -303,7 +303,7 @@ private struct AIPMWorkspaceHeader: View {
 
             HStack(spacing: 8) {
                 Label(status.settings.isEnabled ? "Enabled" : "Disabled", systemImage: status.settings.isEnabled ? "checkmark.circle" : "pause.circle")
-                Label(llmStatus.isAvailable ? "Provider Ready" : "Provider Needs Setup", systemImage: llmStatus.isAvailable ? "bolt.circle" : "exclamationmark.triangle")
+                Label(providerStatusTitle, systemImage: providerStatusImage)
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
@@ -314,6 +314,20 @@ private struct AIPMWorkspaceHeader: View {
 
     private var canRun: Bool {
         !isRunning && status.settings.isEnabled && llmStatus.isAvailable && hasBoard
+    }
+
+    private var providerStatusTitle: String {
+        if llmStatus.lastFailureMessage?.isEmpty == false {
+            return "Provider Retryable"
+        }
+        return llmStatus.isAvailable ? "Provider Ready" : "Provider Needs Setup"
+    }
+
+    private var providerStatusImage: String {
+        if llmStatus.lastFailureMessage?.isEmpty == false {
+            return "arrow.clockwise.circle"
+        }
+        return llmStatus.isAvailable ? "bolt.circle" : "exclamationmark.triangle"
     }
 }
 
@@ -1151,43 +1165,115 @@ struct AIPMProjectIntelligenceView: View {
     let intelligence: AIPMProjectIntelligenceSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                LabeledContent("Active", value: "\(intelligence.totalActiveBeads)")
-                LabeledContent("Blocked", value: "\(intelligence.blockedBeads)")
-                LabeledContent("Stale", value: "\(intelligence.staleBeads)")
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 8)], spacing: 8) {
+                AIPMIntelligenceMetric(title: "Active", value: intelligence.totalActiveBeads, color: .secondary)
+                AIPMIntelligenceMetric(title: "Blocked", value: intelligence.blockedBeads, color: intelligence.blockedBeads > 0 ? .red : .secondary)
+                AIPMIntelligenceMetric(title: "Stale", value: intelligence.staleBeads, color: intelligence.staleBeads > 0 ? .orange : .secondary)
+                AIPMIntelligenceMetric(title: "Urgent", value: intelligence.urgentBeads, color: intelligence.urgentBeads > 0 ? .orange : .secondary)
+                AIPMIntelligenceMetric(title: "Hierarchy", value: intelligence.orphanedChildren, color: intelligence.orphanedChildren > 0 ? .orange : .secondary)
+                AIPMIntelligenceMetric(title: "Deps", value: intelligence.dependencyIssues, color: intelligence.dependencyIssues > 0 ? .orange : .secondary)
             }
-            .font(.caption)
+
+            HStack(spacing: 8) {
+                Label("\(criticalCount) critical", systemImage: "exclamationmark.octagon")
+                    .foregroundStyle(criticalCount > 0 ? .red : .secondary)
+                Label("\(warningCount) warnings", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(warningCount > 0 ? .orange : .secondary)
+                Label("\(infoCount) info", systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption.weight(.semibold))
 
             Text("Generated \(intelligence.generatedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ForEach(intelligence.signals.prefix(6)) { signal in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(signal.severity.displayName)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(color(for: signal.severity))
-                        Text(signal.category.displayName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(signal.title)
-                        .font(.subheadline.weight(.semibold))
-                    Text(signal.detail)
-                        .font(.caption)
+            ForEach(groupedSignals, id: \.category) { group in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(group.category.displayName)
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    if !signal.beadIDs.isEmpty {
-                        Text(signal.beadIDs.prefix(6).joined(separator: ", "))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+
+                    ForEach(group.signals) { signal in
+                        AIPMProjectSignalRow(signal: signal)
                     }
                 }
-                .padding(.vertical, 4)
             }
         }
+    }
+
+    private var criticalCount: Int {
+        intelligence.signals.filter { $0.severity == .critical }.count
+    }
+
+    private var warningCount: Int {
+        intelligence.signals.filter { $0.severity == .warning }.count
+    }
+
+    private var infoCount: Int {
+        intelligence.signals.filter { $0.severity == .info }.count
+    }
+
+    private var groupedSignals: [(category: AIPMProjectSignalCategory, signals: [AIPMProjectSignal])] {
+        AIPMProjectSignalCategory.allCases.compactMap { category in
+            let signals = intelligence.signals.filter { $0.category == category }
+            return signals.isEmpty ? nil : (category, signals)
+        }
+    }
+}
+
+private struct AIPMIntelligenceMetric: View {
+    let title: String
+    let value: Int
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct AIPMProjectSignalRow: View {
+    let signal: AIPMProjectSignal
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: icon(for: signal.severity))
+                    .foregroundStyle(color(for: signal.severity))
+                Text(signal.severity.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(color(for: signal.severity))
+                Spacer()
+                if !signal.beadIDs.isEmpty {
+                    Text("\(signal.beadIDs.count) bead\(signal.beadIDs.count == 1 ? "" : "s")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(signal.title)
+                .font(.subheadline.weight(.semibold))
+            Text(signal.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !signal.beadIDs.isEmpty {
+                Text(signal.beadIDs.prefix(10).joined(separator: ", "))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 6)
     }
 
     private func color(for severity: AIPMProjectSignalSeverity) -> Color {
@@ -1198,6 +1284,17 @@ struct AIPMProjectIntelligenceView: View {
             .orange
         case .critical:
             .red
+        }
+    }
+
+    private func icon(for severity: AIPMProjectSignalSeverity) -> String {
+        switch severity {
+        case .info:
+            "info.circle"
+        case .warning:
+            "exclamationmark.triangle"
+        case .critical:
+            "exclamationmark.octagon"
         }
     }
 }

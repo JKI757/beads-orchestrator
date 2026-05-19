@@ -1165,10 +1165,10 @@ final class LLMServerConfigurationStore: ObservableObject {
 
         if let lastFailureMessage, !lastFailureMessage.isEmpty {
             return BeadsLLMStatus(
-                isAvailable: false,
+                isAvailable: true,
                 provider: providerName,
                 model: modelName,
-                message: "LLM provider failed safely: \(lastFailureMessage)",
+                message: "Last LLM run failed: \(lastFailureMessage)",
                 lastLatencyMilliseconds: lastLatencyMilliseconds,
                 lastFailureMessage: lastFailureMessage,
                 updatedAt: Date()

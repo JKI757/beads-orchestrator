@@ -25,6 +25,7 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertTrue(intelligence.signals.contains { $0.category == .stale })
         XCTAssertTrue(intelligence.signals.contains { $0.category == .hierarchy })
         XCTAssertTrue(intelligence.signals.contains { $0.category == .dependency })
+        XCTAssertTrue(intelligence.signals.contains { $0.category == .quality })
     }
 
     func testHealthyProjectIntelligenceEmitsHealthySignal() throws {
@@ -251,6 +252,12 @@ final class AIPMEvaluationHarnessTests: XCTestCase {
         XCTAssertEqual(store.configuration.timeoutSeconds, 5)
         XCTAssertEqual(store.configuration.maximumResponseBytes, 65_536)
         XCTAssertEqual(store.configuration.retryLimit, 5)
+
+        store.recordProviderFailure("HTTP 400")
+
+        XCTAssertTrue(store.status.isAvailable)
+        XCTAssertEqual(store.status.lastFailureMessage, "HTTP 400")
+        XCTAssertTrue(store.status.message.contains("Last LLM run failed"))
     }
 
     func testLLMConfigurationDecodesLegacySettingsWithSafeguardDefaults() throws {
