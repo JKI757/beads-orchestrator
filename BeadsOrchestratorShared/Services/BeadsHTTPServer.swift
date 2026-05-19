@@ -727,21 +727,31 @@ final class BeadsHTTPServer: ObservableObject {
                     request.setValue("Bearer \(configuration.trimmedAPIKey)", forHTTPHeaderField: "Authorization")
                 }
 
-                let chatRequest = OpenAIChatRequest(
-                    model: configuration.trimmedModelName,
-                    messages: [
-                        OpenAIChatMessage(
-                            role: "system",
-                            content: "You are an AI project manager for a software issue tracker. Return strict JSON only. Do not include markdown."
-                        ),
-                        OpenAIChatMessage(role: "user", content: userPrompt)
-                    ],
-                    temperature: 0.2,
-                    responseFormat: OpenAIResponseFormat(type: "json_object")
+                request.httpBody = try BeadsJSON.encoder.encode(
+                    chatRequest(
+                        for: configuration,
+                        userPrompt: userPrompt,
+                        responseFormat: OpenAIResponseFormat(type: "json_object")
+                    )
                 )
-                request.httpBody = try BeadsJSON.encoder.encode(chatRequest)
+                var (data, response) = try await URLSession.shared.data(for: request)
 
-                let (data, response) = try await URLSession.shared.data(for: request)
+                if
+                    let httpResponse = response as? HTTPURLResponse,
+                    httpResponse.statusCode == 400,
+                    providerMessage(from: data)?.localizedCaseInsensitiveContains("response_format") == true
+                {
+                    var fallbackRequest = request
+                    fallbackRequest.httpBody = try BeadsJSON.encoder.encode(
+                        chatRequest(
+                            for: configuration,
+                            userPrompt: userPrompt,
+                            responseFormat: nil
+                        )
+                    )
+                    (data, response) = try await URLSession.shared.data(for: fallbackRequest)
+                }
+
                 let latency = Date().timeIntervalSince(startedAt)
                 guard data.count <= configuration.sanitizedMaximumResponseBytes else {
                     throw LLMProviderError.responseTooLarge(data.count, configuration.sanitizedMaximumResponseBytes)
@@ -750,11 +760,13 @@ final class BeadsHTTPServer: ObservableObject {
                     throw LLMProviderError.invalidResponse
                 }
                 guard 200..<300 ~= httpResponse.statusCode else {
-                    throw LLMProviderError.providerStatus(httpResponse.statusCode)
+                    throw LLMProviderError.providerStatus(httpResponse.statusCode, providerMessage(from: data))
                 }
 
-                let chatResponse = try BeadsJSON.decoder.decode(OpenAIChatResponse.self, from: data)
-                guard let content = chatResponse.choices.first?.message.content else {
+                guard
+                    let chatResponse = try? BeadsJSON.decoder.decode(OpenAIChatResponse.self, from: data),
+                    let content = chatResponse.choices.first?.message.content
+                else {
                     throw LLMProviderError.invalidResponse
                 }
                 llmConfiguration.recordProviderSuccess(latency: latency)
@@ -779,7 +791,7 @@ final class BeadsHTTPServer: ObservableObject {
     private func isRetryableLLMError(_ error: Error) -> Bool {
         if let providerError = error as? LLMProviderError {
             switch providerError {
-            case let .providerStatus(status):
+            case let .providerStatus(status, _):
                 return status == 408 || status == 409 || status == 425 || status == 429 || (500...599).contains(status)
             case .unavailable:
                 return true
@@ -798,6 +810,31 @@ final class BeadsHTTPServer: ObservableObject {
         }
 
         return false
+    }
+
+    private func chatRequest(
+        for configuration: LLMServerConfiguration,
+        userPrompt: String,
+        responseFormat: OpenAIResponseFormat?
+    ) -> OpenAIChatRequest {
+        OpenAIChatRequest(
+            model: configuration.trimmedModelName,
+            messages: [
+                OpenAIChatMessage(
+                    role: "system",
+                    content: "You are an AI project manager for a software issue tracker. Return strict JSON only. Do not include markdown."
+                ),
+                OpenAIChatMessage(role: "user", content: userPrompt)
+            ],
+            temperature: 0.2,
+            responseFormat: responseFormat
+        )
+    }
+
+    private func providerMessage(from data: Data) -> String? {
+        let message = String(decoding: data.prefix(600), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? nil : message
     }
 
     private func normalizedLLMError(_ error: Error) -> LLMProviderError {
@@ -1431,7 +1468,7 @@ private struct OpenAIChatRequest: Encodable {
     var model: String
     var messages: [OpenAIChatMessage]
     var temperature: Double
-    var responseFormat: OpenAIResponseFormat
+    var responseFormat: OpenAIResponseFormat?
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -1461,7 +1498,7 @@ private struct OpenAIChatResponse: Decodable {
 private enum LLMProviderError: LocalizedError {
     case unavailable(String)
     case invalidResponse
-    case providerStatus(Int)
+    case providerStatus(Int, String?)
     case responseTooLarge(Int, Int)
 
     var errorDescription: String? {
@@ -1470,8 +1507,12 @@ private enum LLMProviderError: LocalizedError {
             message
         case .invalidResponse:
             "The LLM provider returned an invalid response."
-        case .providerStatus(let status):
-            "The LLM provider returned HTTP \(status)."
+        case let .providerStatus(status, message):
+            if let message, !message.isEmpty {
+                "The LLM provider returned HTTP \(status): \(message)"
+            } else {
+                "The LLM provider returned HTTP \(status)."
+            }
         case let .responseTooLarge(actual, limit):
             "The LLM provider returned \(actual) bytes, above the configured \(limit) byte limit."
         }
