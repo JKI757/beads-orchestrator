@@ -715,6 +715,7 @@ struct HierarchyView: View {
         HierarchyGraphBuilder.graph(
             from: store.visibleBeads(in: board),
             presentation: presentation,
+            mode: mode,
             offsets: nodeOffsets
         )
     }
@@ -738,6 +739,7 @@ struct HierarchyView: View {
                 HierarchyGraphView(
                     graph: graph,
                     presentation: presentation,
+                    mode: mode,
                     pendingSourceID: pendingSourceID,
                     selectedBeadID: store.selectedBeadID,
                     nodeOffsets: $nodeOffsets,
@@ -947,11 +949,21 @@ private enum HierarchyGraphMode: String, CaseIterable, Identifiable {
         case .dependency: "arrow.right"
         }
     }
+
+    func includes(_ edgeKind: HierarchyGraphEdge.Kind) -> Bool {
+        switch (self, edgeKind) {
+        case (.inspect, _), (.parent, .parent), (.dependency, .dependency):
+            true
+        default:
+            false
+        }
+    }
 }
 
 private struct HierarchyGraphView: View {
     let graph: HierarchyGraph
     let presentation: HierarchyPresentation
+    let mode: HierarchyGraphMode
     let pendingSourceID: String?
     let selectedBeadID: Bead.ID?
     @Binding var nodeOffsets: [String: CGSize]
@@ -966,7 +978,7 @@ private struct HierarchyGraphView: View {
                 ZStack(alignment: .topLeading) {
                     HierarchyEdgeCanvas(graph: graph)
 
-                    ForEach(graph.edges) { edge in
+                    ForEach(graph.removableEdges) { edge in
                         HierarchyEdgeClearButton(edge: edge, graph: graph, clearRelationship: clearRelationship)
                     }
 
@@ -976,6 +988,7 @@ private struct HierarchyGraphView: View {
                             isCompact: isCompact,
                             isSelected: selectedBeadID == node.bead.id,
                             isPendingSource: pendingSourceID == node.id,
+                            mode: mode,
                             selectNode: selectNode
                         )
                         .frame(width: graph.metrics.nodeWidth, height: graph.metrics.nodeHeight)
@@ -1097,6 +1110,7 @@ private struct HierarchyGraphNodeView: View {
     let isCompact: Bool
     let isSelected: Bool
     let isPendingSource: Bool
+    let mode: HierarchyGraphMode
     let selectNode: (HierarchyGraphNode) -> Void
 
     private var statusText: String {
@@ -1162,6 +1176,14 @@ private struct HierarchyGraphNodeView: View {
                 RoundedRectangle(cornerRadius: isCompact ? 7 : 8, style: .continuous)
                     .stroke(borderColor, lineWidth: isSelected || isPendingSource ? 2 : 1)
             }
+            .overlay(alignment: .bottomTrailing) {
+                if mode != .inspect {
+                    Image(systemName: mode.systemImage)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(mode == .parent ? .blue : .orange)
+                        .padding(6)
+                }
+            }
         }
         .buttonStyle(.plain)
         .shadow(color: Color.black.opacity(0.06), radius: 6, x: 0, y: 2)
@@ -1200,6 +1222,7 @@ private struct HierarchyChip: View {
 private struct HierarchyGraph {
     let nodes: [HierarchyGraphNode]
     let edges: [HierarchyGraphEdge]
+    let mode: HierarchyGraphMode
     let metrics: HierarchyGraphMetrics
     let canvasSize: CGSize
 
@@ -1213,6 +1236,10 @@ private struct HierarchyGraph {
 
     var dependencyEdgeCount: Int {
         edges.filter { $0.kind == .dependency }.count
+    }
+
+    var removableEdges: [HierarchyGraphEdge] {
+        mode == .inspect ? edges : []
     }
 
     func frame(for id: String) -> CGRect? {
@@ -1279,7 +1306,12 @@ private struct HierarchyGraphMetrics {
 }
 
 private enum HierarchyGraphBuilder {
-    static func graph(from beads: [Bead], presentation: HierarchyPresentation, offsets: [String: CGSize]) -> HierarchyGraph {
+    static func graph(
+        from beads: [Bead],
+        presentation: HierarchyPresentation,
+        mode: HierarchyGraphMode,
+        offsets: [String: CGSize]
+    ) -> HierarchyGraph {
         let orderedBeads = beads.filter { !$0.isArchived }
         let metrics = HierarchyGraphMetrics.metrics(for: presentation)
         let beadsByID = Dictionary(
@@ -1288,13 +1320,25 @@ private enum HierarchyGraphBuilder {
         )
         let visibleIDs = Set(beadsByID.keys)
         let childIDsByParent = childMap(for: orderedBeads, visibleIDs: visibleIDs)
-        let dependencyEdges = dependencyEdges(for: orderedBeads, visibleIDs: visibleIDs, beadsByID: beadsByID)
-        let depthByID = depths(for: orderedBeads, childIDsByParent: childIDsByParent)
+        let allDependencyEdges = dependencyEdges(for: orderedBeads, visibleIDs: visibleIDs, beadsByID: beadsByID)
+        let parentEdges = childIDsByParent.flatMap { parentID, childIDs in
+            childIDs.map {
+                HierarchyGraphEdge(fromID: parentID, toID: $0, kind: .parent, isBlocked: beadsByID[$0]?.isBlocked ?? false)
+            }
+        }
+        let visibleEdges = stableUniqueEdges((parentEdges + allDependencyEdges).filter { mode.includes($0.kind) })
+        let layoutChildIDsByParent = mode.includes(.parent) ? childIDsByParent : [:]
+        let layoutDependencyEdges = mode.includes(.dependency) ? allDependencyEdges : []
+        let depthByID = depths(
+            for: orderedBeads,
+            childIDsByParent: layoutChildIDsByParent,
+            dependencyEdges: layoutDependencyEdges
+        )
         let framesByID = layoutFrames(
             for: orderedBeads,
             depthByID: depthByID,
-            childIDsByParent: childIDsByParent,
-            dependencyEdges: dependencyEdges,
+            childIDsByParent: layoutChildIDsByParent,
+            dependencyEdges: layoutDependencyEdges,
             metrics: metrics,
             offsets: offsets
         )
@@ -1314,12 +1358,6 @@ private enum HierarchyGraphBuilder {
                 )
         }
 
-        let parentEdges = childIDsByParent.flatMap { parentID, childIDs in
-            childIDs.map {
-                HierarchyGraphEdge(fromID: parentID, toID: $0, kind: .parent, isBlocked: beadsByID[$0]?.isBlocked ?? false)
-            }
-        }
-        let edges = stableUniqueEdges(parentEdges + dependencyEdges)
         let maxX = nodes.map(\.frame.maxX).max() ?? 0
         let maxY = nodes.map(\.frame.maxY).max() ?? 0
         let minX = min(nodes.map(\.frame.minX).min() ?? 0, 0)
@@ -1336,34 +1374,30 @@ private enum HierarchyGraphBuilder {
 
         return HierarchyGraph(
             nodes: shiftedNodes,
-            edges: edges,
+            edges: visibleEdges,
+            mode: mode,
             metrics: metrics,
             canvasSize: CGSize(width: maxX + abs(minX) + metrics.inset, height: maxY + abs(minY) + metrics.inset)
         )
     }
 
-    private static func depths(for beads: [Bead], childIDsByParent: [String: [String]]) -> [String: Int] {
+    private static func depths(
+        for beads: [Bead],
+        childIDsByParent: [String: [String]],
+        dependencyEdges: [HierarchyGraphEdge]
+    ) -> [String: Int] {
         let orderedIDs = beads.map(\.relationshipID)
         let visibleIDs = Set(orderedIDs)
         var parentIDsByChild: [String: [String]] = [:]
-
-        for bead in beads {
-            let relationshipID = bead.relationshipID
-            if let parentID = bead.parentBeadsID, visibleIDs.contains(parentID) {
-                parentIDsByChild[relationshipID, default: []].append(parentID)
-            }
-            for dependencyID in bead.dependencyBeadsIDs where visibleIDs.contains(dependencyID) {
-                parentIDsByChild[relationshipID, default: []].append(dependencyID)
-            }
-            for dependentID in bead.dependentBeadsIDs where visibleIDs.contains(dependentID) {
-                parentIDsByChild[dependentID, default: []].append(relationshipID)
-            }
-        }
 
         for (parentID, childIDs) in childIDsByParent {
             for childID in childIDs {
                 parentIDsByChild[childID, default: []].append(parentID)
             }
+        }
+
+        for edge in dependencyEdges {
+            parentIDsByChild[edge.toID, default: []].append(edge.fromID)
         }
 
         var memo: [String: Int] = [:]
