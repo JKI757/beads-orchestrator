@@ -206,11 +206,19 @@ struct AIPMWorkspaceView: View {
         draft = pmState.state.settings
     }
 
+    @MainActor
     private func runPM() async {
+        guard !isRunning else { return }
         save()
-        isRunning = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isRunning = true
+        }
         errorMessage = nil
-        defer { isRunning = false }
+        defer {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isRunning = false
+            }
+        }
 
         do {
             _ = try await server.runAIPM(request: AIPMRunRequest(boardID: store.selectedBoardID))
@@ -256,37 +264,46 @@ private struct AIPMWorkspaceHeader: View {
 
                 Spacer()
 
-                HStack {
-                    Button {
-                        runPM()
-                    } label: {
-                        Label("Run", systemImage: "play.circle")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canRun)
+                VStack(alignment: .trailing, spacing: 6) {
+                    HStack {
+                        Button {
+                            runPM()
+                        } label: {
+                            AIPMRunButtonLabel(isRunning: isRunning, title: "Run")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!canRun)
 
-                    Button {
-                        saveSettings()
-                    } label: {
-                        Label("Save", systemImage: "checkmark.circle")
-                    }
-                    .buttonStyle(.bordered)
+                        Button {
+                            saveSettings()
+                        } label: {
+                            Label("Save", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.bordered)
 
-                    Button {
-                        openLLMSettings()
-                    } label: {
-                        Label("LLM", systemImage: "gearshape")
+                        Button {
+                            openLLMSettings()
+                        } label: {
+                            Label("LLM", systemImage: "gearshape")
+                        }
+                        .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
+
+                    if isRunning {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("AI PM run in progress")
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
 
             HStack(spacing: 8) {
                 Label(status.settings.isEnabled ? "Enabled" : "Disabled", systemImage: status.settings.isEnabled ? "checkmark.circle" : "pause.circle")
                 Label(llmStatus.isAvailable ? "Provider Ready" : "Provider Needs Setup", systemImage: llmStatus.isAvailable ? "bolt.circle" : "exclamationmark.triangle")
-                if isRunning {
-                    Label("Running", systemImage: "hourglass")
-                }
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
@@ -297,6 +314,23 @@ private struct AIPMWorkspaceHeader: View {
 
     private var canRun: Bool {
         !isRunning && status.settings.isEnabled && llmStatus.isAvailable && hasBoard
+    }
+}
+
+private struct AIPMRunButtonLabel: View {
+    let isRunning: Bool
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "play.circle")
+            }
+            Text(isRunning ? "Running" : title)
+        }
     }
 }
 
@@ -582,15 +616,18 @@ private struct AIPMDashboardContent: View {
             if showsSheetActions {
                 Divider()
 
-                HStack {
-                    Button("Run Now") {
+                HStack(spacing: 10) {
+                    Button {
                         Task { await runPM() }
+                    } label: {
+                        AIPMRunButtonLabel(isRunning: isRunning, title: "Run Now")
                     }
                     .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
 
                     if isRunning {
-                        ProgressView()
-                            .controlSize(.small)
+                        Text("AI PM run in progress")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
 
                     Spacer()
@@ -615,7 +652,7 @@ private struct AIPMDashboardContent: View {
                     Button {
                         Task { await runPM() }
                     } label: {
-                        Label("Run AI PM", systemImage: "play.circle")
+                        AIPMRunButtonLabel(isRunning: isRunning, title: "Run AI PM")
                     }
                     .disabled(isRunning || !draft.isEnabled || !server.llmConfiguration.status.isAvailable)
 
@@ -626,8 +663,9 @@ private struct AIPMDashboardContent: View {
                     }
 
                     if isRunning {
-                        ProgressView()
-                            .controlSize(.small)
+                        Text("Running")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -660,11 +698,19 @@ private struct AIPMDashboardContent: View {
         draft = pmState.state.settings
     }
 
+    @MainActor
     private func runPM() async {
+        guard !isRunning else { return }
         save()
-        isRunning = true
+        withAnimation(.easeInOut(duration: 0.15)) {
+            isRunning = true
+        }
         errorMessage = nil
-        defer { isRunning = false }
+        defer {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isRunning = false
+            }
+        }
 
         do {
             _ = try await server.runAIPM()
