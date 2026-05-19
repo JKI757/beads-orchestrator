@@ -968,13 +968,22 @@ private struct HierarchyGraphView: View {
     let selectedBeadID: Bead.ID?
     @Binding var nodeOffsets: [String: CGSize]
     @State private var dragStartOffsets: [String: CGSize] = [:]
+    @State private var zoomScale: CGFloat = 1
+    @State private var zoomStartScale: CGFloat?
     let selectNode: (HierarchyGraphNode) -> Void
     let clearRelationship: (HierarchyGraphEdge) -> Void
     private var isCompact: Bool { presentation == .compact }
+    private let minZoomScale: CGFloat = 0.45
+    private let maxZoomScale: CGFloat = 2.2
 
     var body: some View {
         GeometryReader { proxy in
             ScrollView([.horizontal, .vertical]) {
+                let contentSize = CGSize(
+                    width: max(graph.canvasSize.width, proxy.size.width),
+                    height: max(graph.canvasSize.height, proxy.size.height)
+                )
+
                 ZStack(alignment: .topLeading) {
                     HierarchyEdgeCanvas(graph: graph)
 
@@ -1001,8 +1010,8 @@ private struct HierarchyGraphView: View {
                                     }
                                     let startOffset = dragStartOffsets[node.id] ?? .zero
                                     nodeOffsets[node.id] = CGSize(
-                                        width: startOffset.width + value.translation.width,
-                                        height: startOffset.height + value.translation.height
+                                        width: startOffset.width + value.translation.width / zoomScale,
+                                        height: startOffset.height + value.translation.height / zoomScale
                                     )
                                 }
                                 .onEnded { _ in
@@ -1012,14 +1021,39 @@ private struct HierarchyGraphView: View {
                     }
                 }
                 .frame(
-                    width: max(graph.canvasSize.width, proxy.size.width),
-                    height: max(graph.canvasSize.height, proxy.size.height),
+                    width: contentSize.width,
+                    height: contentSize.height,
+                    alignment: .topLeading
+                )
+                .scaleEffect(zoomScale, anchor: .topLeading)
+                .frame(
+                    width: contentSize.width * zoomScale,
+                    height: contentSize.height * zoomScale,
                     alignment: .topLeading
                 )
                 .padding(.trailing, 20)
                 .padding(.bottom, 20)
             }
+            .gesture(zoomGesture)
         }
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                if zoomStartScale == nil {
+                    zoomStartScale = zoomScale
+                }
+                zoomScale = clampedZoom((zoomStartScale ?? zoomScale) * value)
+            }
+            .onEnded { value in
+                zoomScale = clampedZoom((zoomStartScale ?? zoomScale) * value)
+                zoomStartScale = nil
+            }
+    }
+
+    private func clampedZoom(_ scale: CGFloat) -> CGFloat {
+        min(max(scale, minZoomScale), maxZoomScale)
     }
 }
 
